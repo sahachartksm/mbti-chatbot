@@ -78,7 +78,7 @@ import { ChatService, Result } from '../../services/chat.service';
           </div>
         </div>
 
-        @if (r.famous_people?.length) {
+        @if (r.famous_people.length) {
           <div class="famous">
             <h4>⭐ คนดังที่ถูกจัดว่าเป็น {{ r.mbti_type }}</h4>
             <p>{{ r.famous_people.join(' · ') }}</p>
