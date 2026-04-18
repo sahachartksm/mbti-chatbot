@@ -43,6 +43,9 @@ Chatbot ทายลักษณะนิสัยโดยอิงทฤษฎ
 | 5 | [docs/03-api.md](./docs/03-api.md) | REST API reference |
 | 6 | [docs/04-code-walkthrough.md](./docs/04-code-walkthrough.md) | ไล่โค้ดทีละส่วน (backend, AI, frontend) |
 | 7 | [docs/06-troubleshooting.md](./docs/06-troubleshooting.md) | แก้ปัญหาที่พบบ่อย |
+| 8 | [docs/07-training-walkthrough.md](./docs/07-training-walkthrough.md) | เจาะลึก `train.py` + progress log |
+| 9 | [docs/08-docker-compose-unified.md](./docs/08-docker-compose-unified.md) | Docker compose รัน stack ทั้งหมดในคำสั่งเดียว |
+| 10 | [docs/09-ngrok-public-exposure.md](./docs/09-ngrok-public-exposure.md) | Expose app ผ่าน ngrok + Angular proxy |
 
 ---
 

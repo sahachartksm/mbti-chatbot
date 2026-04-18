@@ -30,13 +30,20 @@
 | 16:35 | แนะนำ `go mod tidy` (go.sum missing) | — |
 | 16:41 | อธิบายบทบาท MongoDB | — |
 | ~16:45 | **สร้าง Dockerfile ของ 3 services** (ai/backend/frontend) + `.dockerignore` + ขยาย `docker-compose.yml` เพิ่ม services + healthcheck + depends_on chain + shared network + named volumes สำหรับ cache | `ai-service/Dockerfile`, `backend/Dockerfile`, `frontend/Dockerfile`, `*/.dockerignore`, `docker-compose.yml` |
+| 16:47 | Allow ngrok hostname — เพิ่ม `allowedHosts` ใน `angular.json` (ก่อนรู้ว่า Angular 17 ไม่ forward ไป Vite) | `frontend/angular.json` |
+| 16:50 | แนะนำ ngrok `--host-header=rewrite` เป็น workaround ที่ใช้ได้จริง | — |
+| 16:55 | **Angular proxy setup** — สร้าง `proxy.conf.js`, register ใน `angular.json`, เปลี่ยน `environment.development.ts` เป็น `apiBase: '/api'` (relative), เพิ่ม `API_TARGET` env ใน docker-compose frontend | `frontend/proxy.conf.js`, `frontend/angular.json`, `frontend/src/environments/environment.development.ts`, `docker-compose.yml` |
+| 17:00 | สลับ proxy.conf.js จาก array format (webpack style) → object format (Vite style) เพราะ Angular 17 application builder ใช้ Vite | `frontend/proxy.conf.js` |
+| 17:05 | **เขียนเอกสาร** — docker compose principles + ngrok proxy pattern | `docs/08-docker-compose-unified.md`, `docs/09-ngrok-public-exposure.md` |
 
 ### Status ปัจจุบัน
 - ✅ โค้ดพร้อมเทรน (ทั้งแบบ native และ docker)
 - ✅ `docker compose up` รันทั้ง stack ได้ (4 services + mongo-express UI)
 - ✅ Volume mount hot reload (source แก้ บน host → container เห็นทันที)
-- ⏳ รอ user ทดสอบ `docker compose up --build`
-- ⏳ ยังไม่มีไฟล์ `models/mbti_model.pkl` (entrypoint ของ ai container จะ train ครั้งแรกอัตโนมัติ)
+- ✅ เปิด app ผ่าน ngrok ใช้งานได้ — ผ่าน Angular proxy ไม่ต้อง tunnel แยก backend
+- ✅ Frontend ใช้ relative `/api` → portable ทุก environment (local/ngrok/prod)
+- ⏳ ยังไม่มี Dockerfile multi-stage สำหรับ production deploy
+- ⏳ Backend ยังไม่มี hot reload (ต้อง restart manual หรือเพิ่ม `air`)
 
 ---
 
