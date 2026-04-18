@@ -20,7 +20,8 @@ import { ChatService, Result } from '../../services/chat.service';
         <button class="btn" (click)="retry()">ลองอีกครั้ง</button>
         <button class="btn-secondary" (click)="goHome()" style="margin-left:8px">กลับหน้าแรก</button>
       </section>
-    } @else if (result(); as r) {
+    } @else {
+      @if (result(); as r) {
       <section class="card result">
         <div class="type-hero">
           <div class="type-letter">{{ r.mbti_type }}</div>
@@ -88,6 +89,7 @@ import { ChatService, Result } from '../../services/chat.service';
           <button class="btn" (click)="goHome()">ทำใหม่อีกครั้ง</button>
         </div>
       </section>
+      }
     }
   `,
   styles: [`

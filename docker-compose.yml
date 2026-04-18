@@ -1,4 +1,5 @@
 services:
+  # ========== MongoDB ==========
   mongo:
     image: mongo:7
     container_name: chatbot-mongo
@@ -18,8 +19,9 @@ services:
       timeout: 5s
       retries: 5
       start_period: 20s
+    networks: [chatbot-net]
 
-  # Optional: Mongo Express UI (คอมเมนต์ออกถ้าไม่ใช้)
+  # ========== Mongo Express UI (optional) ==========
   mongo-express:
     image: mongo-express:1.0.2
     container_name: chatbot-mongo-ui
@@ -34,7 +36,101 @@ services:
       ME_CONFIG_BASICAUTH: "false"
     ports:
       - "8081:8081"
+    networks: [chatbot-net]
 
+  # ========== AI Service (Python FastAPI) ==========
+  ai:
+    build:
+      context: ./ai-service
+      dockerfile: Dockerfile
+    container_name: chatbot-ai
+    restart: unless-stopped
+    environment:
+      USE_SENTENCE_TRANSFORMER: ${USE_SENTENCE_TRANSFORMER:-true}
+      WATCHFILES_FORCE_POLLING: "true"
+    ports:
+      - "8000:8000"
+    volumes:
+      - ./ai-service:/app                     # hot reload source from host
+      - /app/venv                             # exclude host venv (if exists)
+      - ai_models:/app/models                 # persist trained model across rebuilds
+      - hf_cache:/root/.cache/huggingface     # cache SBERT download (~90MB)
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8000/health"]
+      interval: 15s
+      timeout: 10s
+      retries: 30
+      start_period: 120s   # allow time for first-run training + SBERT download
+    networks: [chatbot-net]
+
+  # ========== Backend (Go) ==========
+  backend:
+    build:
+      context: ./backend
+      dockerfile: Dockerfile
+    container_name: chatbot-backend
+    restart: unless-stopped
+    depends_on:
+      mongo:
+        condition: service_healthy
+      ai:
+        condition: service_healthy
+    environment:
+      BACKEND_PORT: "8080"
+      MONGO_URI: mongodb://${MONGO_USER:-admin}:${MONGO_PASSWORD:-admin123}@mongo:27017/${MONGO_DB:-mbti}?authSource=admin
+      MONGO_DB: ${MONGO_DB:-mbti}
+      AI_SERVICE_URL: http://ai:8000
+      CORS_ORIGINS: http://localhost:4200
+    ports:
+      - "8080:8080"
+    volumes:
+      - ./backend:/app                        # hot reload source
+      - go_mod_cache:/go/pkg/mod              # cache go modules
+      - go_build_cache:/root/.cache/go-build  # cache go build artifacts
+    healthcheck:
+      test: ["CMD", "wget", "--spider", "-q", "http://localhost:8080/api/health"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+      start_period: 30s
+    networks: [chatbot-net]
+
+  # ========== Frontend (Angular) ==========
+  frontend:
+    build:
+      context: ./frontend
+      dockerfile: Dockerfile
+    container_name: chatbot-frontend
+    restart: unless-stopped
+    depends_on:
+      backend:
+        condition: service_started
+    environment:
+      CHOKIDAR_USEPOLLING: "true"
+      WATCHPACK_POLLING: "true"
+    ports:
+      - "4200:4200"
+    volumes:
+      - ./frontend:/app                       # hot reload source
+      - /app/node_modules                     # exclude host node_modules
+      - /app/.angular                         # exclude Angular cache
+    networks: [chatbot-net]
+
+# ========== Volumes ==========
 volumes:
   mongo_data:
     name: chatbot_mongo_data
+  ai_models:
+    name: chatbot_ai_models
+  hf_cache:
+    name: chatbot_hf_cache
+  go_mod_cache:
+    name: chatbot_go_mod_cache
+  go_build_cache:
+    name: chatbot_go_build_cache
+
+# ========== Network ==========
+networks:
+  chatbot-net:
+    name: chatbot-net
+    driver: bridge

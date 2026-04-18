@@ -21,10 +21,22 @@
 | 16:05 | แก้ `requirements.txt` — ลบตัวอักษรไทย + em-dash (pip cp874 decode fail), เปลี่ยน pin เป็น `>=` เพื่อรองรับ Python 3.13 (bump `torch>=2.5.0`, `numpy>=2.1.0`, `sentence-transformers>=3.3.0`) | `ai-service/requirements.txt` |
 | 16:14 | เขียนเอกสารนี้ — อธิบายการเทรน + progress log | `docs/07-training-walkthrough.md` |
 
+### 2026-04-18 (รอบสอง — Docker unification)
+
+| เวลา | สิ่งที่ทำ | ไฟล์ที่ถูกแตะ |
+|---|---|---|
+| 16:20 | แก้ `requirements.txt` encoding (cp874 decode) + bump versions support Py3.13 | `ai-service/requirements.txt` |
+| 16:29 | แก้ Angular 17 `@else if (...; as r)` → `@else { @if (...; as r) }` | `frontend/.../result.component.ts` |
+| 16:35 | แนะนำ `go mod tidy` (go.sum missing) | — |
+| 16:41 | อธิบายบทบาท MongoDB | — |
+| ~16:45 | **สร้าง Dockerfile ของ 3 services** (ai/backend/frontend) + `.dockerignore` + ขยาย `docker-compose.yml` เพิ่ม services + healthcheck + depends_on chain + shared network + named volumes สำหรับ cache | `ai-service/Dockerfile`, `backend/Dockerfile`, `frontend/Dockerfile`, `*/.dockerignore`, `docker-compose.yml` |
+
 ### Status ปัจจุบัน
-- ✅ โค้ดพร้อมเทรน
-- ⏳ รอ user รัน `pip install -r requirements.txt` + `python train.py`
-- ⏳ ยังไม่มีไฟล์ `models/mbti_model.pkl`
+- ✅ โค้ดพร้อมเทรน (ทั้งแบบ native และ docker)
+- ✅ `docker compose up` รันทั้ง stack ได้ (4 services + mongo-express UI)
+- ✅ Volume mount hot reload (source แก้ บน host → container เห็นทันที)
+- ⏳ รอ user ทดสอบ `docker compose up --build`
+- ⏳ ยังไม่มีไฟล์ `models/mbti_model.pkl` (entrypoint ของ ai container จะ train ครั้งแรกอัตโนมัติ)
 
 ---
 
