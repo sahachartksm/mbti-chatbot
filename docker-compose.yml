@@ -108,6 +108,8 @@ services:
     environment:
       CHOKIDAR_USEPOLLING: "true"
       WATCHPACK_POLLING: "true"
+      # proxy.conf.js reads this; inside docker, backend is reachable as service name
+      API_TARGET: http://backend:8080
     ports:
       - "4200:4200"
     volumes:

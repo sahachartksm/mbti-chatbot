@@ -54,7 +54,14 @@
           },
           "defaultConfiguration": "development",
           "options": {
-            "port": 4200
+            "port": 4200,
+            "proxyConfig": "proxy.conf.js",
+            "allowedHosts": [
+              "localhost",
+              ".ngrok-free.dev",
+              ".ngrok.app",
+              ".ngrok.io"
+            ]
           }
         }
       }
