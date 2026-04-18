@@ -1,10 +1,14 @@
-fastapi==0.115.0
-uvicorn[standard]==0.30.6
-pydantic==2.9.2
-scikit-learn==1.5.2
-numpy==1.26.4
-pandas==2.2.3
-joblib==1.4.2
-# Optional — comment out ถ้าไม่ต้องการ free-text semantic matching
-sentence-transformers==3.1.1
-torch==2.4.1
+# Core web framework
+fastapi>=0.115.0
+uvicorn[standard]>=0.30.0
+pydantic>=2.9.0
+
+# ML (versions chosen to support Python 3.11 - 3.13)
+scikit-learn>=1.5.2
+numpy>=2.1.0
+pandas>=2.2.3
+joblib>=1.4.2
+
+# Optional: free-text semantic matching (comment out to skip ~2GB install)
+sentence-transformers>=3.3.0
+torch>=2.5.0

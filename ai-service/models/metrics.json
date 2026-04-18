@@ -1,0 +1,55 @@
+{
+  "n_samples": 20000,
+  "noise": 0.15,
+  "train_size": 16000,
+  "test_size": 4000,
+  "per_dimension": {
+    "EI": {
+      "train_accuracy": 0.9685,
+      "test_accuracy": 0.9637,
+      "precision": 0.9638,
+      "recall": 0.9637,
+      "f1_score": 0.9637
+    },
+    "SN": {
+      "train_accuracy": 0.9742,
+      "test_accuracy": 0.974,
+      "precision": 0.974,
+      "recall": 0.974,
+      "f1_score": 0.974
+    },
+    "TF": {
+      "train_accuracy": 0.9455,
+      "test_accuracy": 0.9363,
+      "precision": 0.9363,
+      "recall": 0.9363,
+      "f1_score": 0.9362
+    },
+    "JP": {
+      "train_accuracy": 0.9729,
+      "test_accuracy": 0.9705,
+      "precision": 0.9705,
+      "recall": 0.9705,
+      "f1_score": 0.9705
+    }
+  },
+  "overall_16type_accuracy": 0.8522,
+  "per_type_accuracy": {
+    "ENFJ": 0.8858,
+    "ENFP": 0.8398,
+    "ENTJ": 0.876,
+    "ENTP": 0.8852,
+    "ESFJ": 0.8651,
+    "ESFP": 0.8645,
+    "ESTJ": 0.8213,
+    "ESTP": 0.8219,
+    "INFJ": 0.8494,
+    "INFP": 0.8333,
+    "INTJ": 0.898,
+    "INTP": 0.8803,
+    "ISFJ": 0.8132,
+    "ISFP": 0.8287,
+    "ISTJ": 0.8678,
+    "ISTP": 0.7975
+  }
+}

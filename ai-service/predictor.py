@@ -19,6 +19,7 @@ MODEL_PATH = Path(__file__).parent / "models" / "mbti_model.pkl"
 # --------- Global ML state ---------
 _bundle = None
 _sbert = None
+_sbert_failed = False
 _sbert_anchors: Optional[Dict[str, np.ndarray]] = None
 
 USE_SBERT = os.getenv("USE_SENTENCE_TRANSFORMER", "true").lower() == "true"
@@ -75,9 +76,9 @@ def load_model():
 
 
 def load_sbert():
-    """Load sentence-transformers lazily (heavy)."""
-    global _sbert, _sbert_anchors
-    if not USE_SBERT:
+    """Load sentence-transformers lazily (heavy). Safe to call many times."""
+    global _sbert, _sbert_anchors, _sbert_failed
+    if not USE_SBERT or _sbert_failed:
         return None, None
     if _sbert is None:
         try:
@@ -89,8 +90,10 @@ def load_sbert():
             }
         except Exception as e:
             print(f"⚠ Could not load sentence-transformers: {e}. Proceeding without.")
-            _sbert = False  # mark as attempted-and-failed
-    return (_sbert if _sbert is not False else None), _sbert_anchors
+            _sbert = None
+            _sbert_failed = True
+            return None, None
+    return _sbert, _sbert_anchors
 
 
 # ---------- Rule-based scoring ----------
@@ -174,11 +177,13 @@ def predict(answers: List[Dict], free_text: Optional[str] = None) -> Dict:
     bundle = load_model()
     feats = answers_to_features(answers).reshape(1, -1)
     X = bundle["scaler"].transform(feats)
-    ml_probs = {}   # dim -> P(pole1) where pole1 = first letter
+    ml_probs = {}   # dim -> P(first letter) (E / S / T / J)
     for dim, clf in bundle["models"].items():
         p = clf.predict_proba(X)[0]
         # labels: 0 = first letter (E,S,T,J), 1 = second (I,N,F,P)
-        ml_probs[dim] = float(p[0])     # P(first letter)
+        # ใช้ clf.classes_ หา index ของ class 0 เพื่อ defensive กับ sklearn เวอร์ชันต่างๆ
+        idx_first = int(np.where(clf.classes_ == 0)[0][0])
+        ml_probs[dim] = float(p[idx_first])
 
     # 3. Text (optional)
     text_sc = text_scores(free_text) if free_text else None
