@@ -3,12 +3,16 @@ fastapi>=0.115.0
 uvicorn[standard]>=0.30.0
 pydantic>=2.9.0
 
-# ML (versions chosen to support Python 3.11 - 3.13)
+# Google Gemini — chat mode primary engine (set GEMINI_API_KEY env to enable)
+google-generativeai>=0.8.0
+
+# ML — quiz mode + keyword fallback for chat (used when Gemini unavailable)
 scikit-learn>=1.5.2
 numpy>=2.1.0
 pandas>=2.2.3
 joblib>=1.4.2
 
-# Optional: free-text semantic matching (comment out to skip ~2GB install)
+# Optional: SBERT semantic matching (keyword fallback, ~2GB install)
+# comment out if not needed
 sentence-transformers>=3.3.0
 torch>=2.5.0

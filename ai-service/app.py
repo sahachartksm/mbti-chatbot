@@ -1,6 +1,12 @@
 """
 FastAPI app — wraps predictor.
 Run:  uvicorn app:app --reload --port 8000
+
+env vars:
+  GEMINI_API_KEY     → เปิดใช้ Google Gemini สำหรับ chat mode (แนะนำ)
+  GEMINI_MODEL       → ชื่อ model (default: gemini-2.0-flash)
+  USE_SENTENCE_TRANSFORMER → true/false (default: true)
+  AI_PORT            → port (default: 8000)
 """
 
 import os
@@ -12,8 +18,11 @@ from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel, Field
 
 from predictor import predict, load_model, load_sbert, USE_SBERT
+import gemini_client
 import chat_predictor
 
+
+# ── Pydantic Models ───────────────────────────────────────────────────────────
 
 class AnswerItem(BaseModel):
     question_id: int = Field(..., ge=1, le=20)
@@ -24,8 +33,6 @@ class PredictRequest(BaseModel):
     answers: List[AnswerItem]
     free_text: Optional[str] = None
 
-
-# ── Chat mode models ──────────────────────────────────────────────────────────
 
 class ChatTurnItem(BaseModel):
     role: str   # "user" | "ai"
@@ -43,41 +50,54 @@ class ChatFinalRequest(BaseModel):
     turns: List[ChatTurnItem]
 
 
+# ── Lifespan ──────────────────────────────────────────────────────────────────
+
 @asynccontextmanager
 async def lifespan(app: FastAPI):
-    # Warm-up on startup
-    try:
-        load_model()
-        print("✓ ML model loaded")
-    except Exception as e:
-        print(f"⚠ Model not loaded: {e}")
-    if USE_SBERT:
+    # 1. Gemini (chat mode primary engine)
+    if gemini_client.init_gemini():
+        print("✓ Gemini API ready")
+    else:
+        print("⚠ Gemini unavailable — chat mode will use keyword fallback")
+        # 2. Fallback: load ML model + SBERT
         try:
-            load_sbert()
-            print("✓ Sentence-transformer loaded")
+            load_model()
+            print("✓ ML model loaded (fallback)")
         except Exception as e:
-            print(f"⚠ SBERT not loaded: {e}")
+            print(f"⚠ ML model not loaded: {e}")
+        if USE_SBERT:
+            try:
+                load_sbert()
+                print("✓ Sentence-transformer loaded (fallback)")
+            except Exception as e:
+                print(f"⚠ SBERT not loaded: {e}")
     yield
 
 
+# ── App ───────────────────────────────────────────────────────────────────────
+
 app = FastAPI(
     title="MBTI AI Service",
-    version="1.0.0",
-    description="Predicts MBTI personality type from questionnaire answers (optional free text).",
+    version="2.0.0",
+    description=(
+        "MBTI analysis via Google Gemini (chat mode) "
+        "or Rule-based + ML (quiz mode / fallback)."
+    ),
     lifespan=lifespan,
 )
 
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"],  # internal service — Go only
+    allow_origins=["*"],
     allow_methods=["*"],
     allow_headers=["*"],
 )
 
 
+# ── Health ────────────────────────────────────────────────────────────────────
+
 @app.get("/health")
 def health():
-    """Health check"""
     model_loaded = True
     try:
         load_model()
@@ -86,14 +106,25 @@ def health():
     sbert, _ = load_sbert()
     return {
         "status": "ok",
-        "model_loaded": model_loaded,
+        "chat_engine": "gemini" if gemini_client.is_available() else "keyword_fallback",
+        "gemini_enabled": gemini_client.is_available(),
+        "gemini_model": gemini_client.GEMINI_MODEL if gemini_client.is_available() else None,
+        "min_turns_for_result": gemini_client.MIN_USER_TURNS_FOR_RESULT,
+        "dim_confidence_threshold": gemini_client.DIM_CONFIDENCE_THRESHOLD,
+        "ml_model_loaded": model_loaded,
         "sbert_loaded": sbert is not None,
         "sbert_enabled": USE_SBERT,
     }
 
 
+# ── Quiz mode: Rule-based + ML (ยังคงใช้ classifier เดิม) ────────────────────
+
 @app.post("/predict")
 def do_predict(req: PredictRequest):
+    """
+    Quiz mode — วิเคราะห์จาก 20 คำตอบ (rule-based + Logistic Regression)
+    ยังคง engine เดิมเพราะ structured answers ทำงานได้ดีกว่า LLM
+    """
     if len(req.answers) < 20:
         raise HTTPException(
             status_code=400,
@@ -109,13 +140,15 @@ def do_predict(req: PredictRequest):
     return result
 
 
-# ── Chat endpoints ────────────────────────────────────────────────────────────
+# ── Chat mode: Gemini LLM (fallback: keyword) ─────────────────────────────────
 
 @app.post("/chat/analyze")
 def chat_analyze(req: ChatAnalyzeRequest):
     """
-    รับ turns ทั้งหมดของ session → วิเคราะห์ behavioral signals
-    → คืน reply + partial_scores + confidence + show_result flag
+    Chat mode — รับ full chat history → Gemini วิเคราะห์ทั้งหมด
+    คืน: reply (natural) + partial_scores + confidence + show_result flag
+
+    Engine: Gemini API (ถ้ามี GEMINI_API_KEY) หรือ keyword fallback
     """
     try:
         turns = [{"role": t.role, "text": t.text} for t in req.turns]
@@ -128,8 +161,10 @@ def chat_analyze(req: ChatAnalyzeRequest):
 @app.post("/chat/final")
 def chat_final(req: ChatFinalRequest):
     """
-    สรุป MBTI type สุดท้ายจากบทสนทนาทั้งหมด
+    Chat mode — สรุป MBTI type สุดท้ายจากบทสนทนาทั้งหมด
     คืน format เดียวกับ /predict
+
+    Engine: Gemini API (ถ้ามี GEMINI_API_KEY) หรือ keyword fallback
     """
     try:
         turns = [{"role": t.role, "text": t.text} for t in req.turns]
