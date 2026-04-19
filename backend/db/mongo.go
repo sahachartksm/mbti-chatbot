@@ -24,12 +24,17 @@ type Repository interface {
 	SaveResult(ctx context.Context, r *models.Result) error
 	GetResult(ctx context.Context, sessionID string) (*models.Result, error)
 	TypeDistribution(ctx context.Context) (map[string]int64, error)
+	// Chat session methods
+	CreateChatSession(ctx context.Context, s *models.ChatSession) error
+	GetChatSession(ctx context.Context, id string) (*models.ChatSession, error)
+	AppendChatTurns(ctx context.Context, id string, turns []models.ChatTurn) error
 }
 
 type MongoRepo struct {
-	client   *mongo.Client
-	sessions *mongo.Collection
-	results  *mongo.Collection
+	client       *mongo.Client
+	sessions     *mongo.Collection
+	results      *mongo.Collection
+	chatSessions *mongo.Collection
 }
 
 func NewMongo(ctx context.Context, uri, dbname string) (*MongoRepo, error) {
@@ -45,9 +50,10 @@ func NewMongo(ctx context.Context, uri, dbname string) (*MongoRepo, error) {
 	}
 	d := client.Database(dbname)
 	return &MongoRepo{
-		client:   client,
-		sessions: d.Collection("sessions"),
-		results:  d.Collection("results"),
+		client:       client,
+		sessions:     d.Collection("sessions"),
+		results:      d.Collection("results"),
+		chatSessions: d.Collection("chat_sessions"),
 	}, nil
 }
 
@@ -118,6 +124,35 @@ func (r *MongoRepo) GetResult(ctx context.Context, sessionID string) (*models.Re
 		return nil, err
 	}
 	return &res, nil
+}
+
+func (r *MongoRepo) CreateChatSession(ctx context.Context, s *models.ChatSession) error {
+	_, err := r.chatSessions.InsertOne(ctx, s)
+	return err
+}
+
+func (r *MongoRepo) GetChatSession(ctx context.Context, id string) (*models.ChatSession, error) {
+	var s models.ChatSession
+	err := r.chatSessions.FindOne(ctx, bson.M{"_id": id}).Decode(&s)
+	if errors.Is(err, mongo.ErrNoDocuments) {
+		return nil, ErrNotFound
+	}
+	if err != nil {
+		return nil, err
+	}
+	return &s, nil
+}
+
+func (r *MongoRepo) AppendChatTurns(ctx context.Context, id string, turns []models.ChatTurn) error {
+	docs := make([]any, len(turns))
+	for i, t := range turns {
+		docs[i] = t
+	}
+	_, err := r.chatSessions.UpdateOne(ctx,
+		bson.M{"_id": id},
+		bson.M{"$push": bson.M{"turns": bson.M{"$each": docs}}},
+	)
+	return err
 }
 
 func (r *MongoRepo) TypeDistribution(ctx context.Context) (map[string]int64, error) {

@@ -61,6 +61,10 @@ func main() {
 		r.Post("/session/{id}/answer", h.AddAnswer)
 		r.Post("/session/{id}/analyze", h.Analyze)
 		r.Get("/session/{id}/result", h.GetResult)
+		// Chat (FAB) mode
+		r.Post("/chat/start", h.ChatStart)
+		r.Post("/chat/message", h.ChatMessage)
+		r.Post("/chat/result", h.ChatResult)
 	})
 
 	// 4. Server with graceful shutdown

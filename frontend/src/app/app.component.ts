@@ -1,10 +1,11 @@
 import { Component } from '@angular/core';
 import { RouterOutlet } from '@angular/router';
+import { FabChatComponent } from './components/fab-chat/fab-chat.component';
 
 @Component({
   selector: 'app-root',
   standalone: true,
-  imports: [RouterOutlet],
+  imports: [RouterOutlet, FabChatComponent],
   template: `
     <main class="shell">
       <header class="top">
@@ -16,6 +17,7 @@ import { RouterOutlet } from '@angular/router';
         Made with Angular · Go · Python · MongoDB
       </footer>
     </main>
+    <app-fab-chat />
   `,
   styles: [`
     .shell {

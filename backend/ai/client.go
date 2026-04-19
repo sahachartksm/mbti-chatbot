@@ -16,6 +16,33 @@ import (
 type Client interface {
 	Health(ctx context.Context) error
 	Predict(ctx context.Context, req PredictRequest) (*PredictResponse, error)
+	ChatAnalyze(ctx context.Context, req ChatAnalyzeRequest) (*ChatAnalyzeResponse, error)
+	ChatFinal(ctx context.Context, req ChatFinalRequest) (*PredictResponse, error)
+}
+
+// ── Chat request/response types ───────────────────────────────────────────────
+
+type ChatTurnDTO struct {
+	Role string `json:"role"`
+	Text string `json:"text"`
+}
+
+type ChatAnalyzeRequest struct {
+	SessionID     string        `json:"session_id"`
+	Turns         []ChatTurnDTO `json:"turns"`
+	UserTurnCount int           `json:"user_turn_count"`
+}
+
+type ChatAnalyzeResponse struct {
+	Reply         string         `json:"reply"`
+	PartialScores map[string]int `json:"partial_scores"`
+	Confidence    float64        `json:"confidence"`
+	ShowResult    bool           `json:"show_result"`
+}
+
+type ChatFinalRequest struct {
+	SessionID string        `json:"session_id"`
+	Turns     []ChatTurnDTO `json:"turns"`
 }
 
 type PredictRequest struct {
@@ -61,28 +88,47 @@ func (c *httpClient) Health(ctx context.Context) error {
 	return nil
 }
 
-func (c *httpClient) Predict(ctx context.Context, req PredictRequest) (*PredictResponse, error) {
-	buf, err := json.Marshal(req)
+func (c *httpClient) post(ctx context.Context, path string, body any, out any) error {
+	buf, err := json.Marshal(body)
 	if err != nil {
-		return nil, err
+		return err
 	}
-	httpReq, err := http.NewRequestWithContext(ctx, "POST", c.baseURL+"/predict", bytes.NewReader(buf))
+	httpReq, err := http.NewRequestWithContext(ctx, "POST", c.baseURL+path, bytes.NewReader(buf))
 	if err != nil {
-		return nil, err
+		return err
 	}
 	httpReq.Header.Set("Content-Type", "application/json")
-
 	resp, err := c.http.Do(httpReq)
 	if err != nil {
-		return nil, err
+		return err
 	}
 	defer resp.Body.Close()
-	body, _ := io.ReadAll(resp.Body)
+	raw, _ := io.ReadAll(resp.Body)
 	if resp.StatusCode != 200 {
-		return nil, errors.New("ai error: " + string(body))
+		return errors.New("ai error: " + string(raw))
 	}
+	return json.Unmarshal(raw, out)
+}
+
+func (c *httpClient) ChatAnalyze(ctx context.Context, req ChatAnalyzeRequest) (*ChatAnalyzeResponse, error) {
+	var out ChatAnalyzeResponse
+	if err := c.post(ctx, "/chat/analyze", req, &out); err != nil {
+		return nil, err
+	}
+	return &out, nil
+}
+
+func (c *httpClient) ChatFinal(ctx context.Context, req ChatFinalRequest) (*PredictResponse, error) {
 	var out PredictResponse
-	if err := json.Unmarshal(body, &out); err != nil {
+	if err := c.post(ctx, "/chat/final", req, &out); err != nil {
+		return nil, err
+	}
+	return &out, nil
+}
+
+func (c *httpClient) Predict(ctx context.Context, req PredictRequest) (*PredictResponse, error) {
+	var out PredictResponse
+	if err := c.post(ctx, "/predict", req, &out); err != nil {
 		return nil, err
 	}
 	return &out, nil

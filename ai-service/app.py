@@ -12,6 +12,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel, Field
 
 from predictor import predict, load_model, load_sbert, USE_SBERT
+import chat_predictor
 
 
 class AnswerItem(BaseModel):
@@ -22,6 +23,24 @@ class AnswerItem(BaseModel):
 class PredictRequest(BaseModel):
     answers: List[AnswerItem]
     free_text: Optional[str] = None
+
+
+# ── Chat mode models ──────────────────────────────────────────────────────────
+
+class ChatTurnItem(BaseModel):
+    role: str   # "user" | "ai"
+    text: str
+
+
+class ChatAnalyzeRequest(BaseModel):
+    session_id: str
+    turns: List[ChatTurnItem]
+    user_turn_count: int = 0
+
+
+class ChatFinalRequest(BaseModel):
+    session_id: str
+    turns: List[ChatTurnItem]
 
 
 @asynccontextmanager
@@ -87,6 +106,36 @@ def do_predict(req: PredictRequest):
         raise HTTPException(status_code=503, detail=str(e))
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"predict error: {e}")
+    return result
+
+
+# ── Chat endpoints ────────────────────────────────────────────────────────────
+
+@app.post("/chat/analyze")
+def chat_analyze(req: ChatAnalyzeRequest):
+    """
+    รับ turns ทั้งหมดของ session → วิเคราะห์ behavioral signals
+    → คืน reply + partial_scores + confidence + show_result flag
+    """
+    try:
+        turns = [{"role": t.role, "text": t.text} for t in req.turns]
+        result = chat_predictor.analyze(turns, req.user_turn_count)
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"chat analyze error: {e}")
+    return result
+
+
+@app.post("/chat/final")
+def chat_final(req: ChatFinalRequest):
+    """
+    สรุป MBTI type สุดท้ายจากบทสนทนาทั้งหมด
+    คืน format เดียวกับ /predict
+    """
+    try:
+        turns = [{"role": t.role, "text": t.text} for t in req.turns]
+        result = chat_predictor.finalize(turns)
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"chat final error: {e}")
     return result
 
 

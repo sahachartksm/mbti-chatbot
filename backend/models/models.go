@@ -2,6 +2,21 @@ package models
 
 import "time"
 
+// ChatTurn — 1 turn ในการสนทนา (role: "user" | "ai")
+type ChatTurn struct {
+	Role          string         `json:"role"                     bson:"role"`
+	Text          string         `json:"text"                     bson:"text"`
+	Timestamp     time.Time      `json:"timestamp"                bson:"ts"`
+	PartialScores map[string]int `json:"partial_scores,omitempty" bson:"partial_scores,omitempty"`
+}
+
+// ChatSession — session ของ FAB chat mode (เก็บใน collection "chat_sessions")
+type ChatSession struct {
+	ID        string     `json:"session_id" bson:"_id"`
+	CreatedAt time.Time  `json:"created_at" bson:"created_at"`
+	Turns     []ChatTurn `json:"turns"      bson:"turns"`
+}
+
 // Answer — คำตอบ 1 ข้อ
 type Answer struct {
 	QuestionID int    `json:"question_id" bson:"question_id"`
