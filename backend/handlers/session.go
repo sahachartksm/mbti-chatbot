@@ -91,10 +91,11 @@ func (h *Handler) GetSession(w http.ResponseWriter, r *http.Request) {
 
 type answerReq struct {
 	QuestionID int    `json:"question_id"`
-	ChoiceID   string `json:"choice_id"`
+	Text       string `json:"text"`
 }
 
-// POST /api/session/:id/answer
+// POST /api/session/:id/answer — save or update one free-text answer.
+// (optional in new flow — frontend usually submits all answers at /analyze)
 func (h *Handler) AddAnswer(w http.ResponseWriter, r *http.Request) {
 	sid := chi.URLParam(r, "id")
 	var req answerReq
@@ -102,17 +103,28 @@ func (h *Handler) AddAnswer(w http.ResponseWriter, r *http.Request) {
 		writeErr(w, 400, "invalid json", nil)
 		return
 	}
-	// validate question/choice
-	if req.QuestionID < 1 || req.QuestionID > questions.Total() {
+	if questions.FindByID(req.QuestionID) == nil {
 		writeErr(w, 400, "invalid question_id", nil)
 		return
 	}
-	if questions.FindChoice(req.QuestionID, req.ChoiceID) == nil {
-		writeErr(w, 400, "invalid choice_id", nil)
+
+	// load session to get lang (for storing the question snapshot in correct language)
+	sess, err := h.Repo.GetSession(r.Context(), sid)
+	if errors.Is(err, db.ErrNotFound) {
+		writeErr(w, 404, "session not found", nil)
+		return
+	}
+	if err != nil {
+		writeErr(w, 500, err.Error(), nil)
 		return
 	}
 
-	s, err := h.Repo.AddAnswer(r.Context(), sid, models.Answer{QuestionID: req.QuestionID, ChoiceID: req.ChoiceID})
+	ans := models.Answer{
+		QuestionID: req.QuestionID,
+		Question:   questions.TextFor(req.QuestionID, sess.Lang),
+		Text:       req.Text,
+	}
+	s, err := h.Repo.AddAnswer(r.Context(), sid, ans)
 	if errors.Is(err, db.ErrNotFound) {
 		writeErr(w, 404, "session not found", nil)
 		return

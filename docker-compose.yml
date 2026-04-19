@@ -38,7 +38,7 @@ services:
       - "8081:8081"
     networks: [chatbot-net]
 
-  # ========== AI Service (Python FastAPI) ==========
+  # ========== AI Service (Python FastAPI + Ollama client) ==========
   ai:
     build:
       context: ./ai-service
@@ -46,21 +46,30 @@ services:
     container_name: chatbot-ai
     restart: unless-stopped
     environment:
-      USE_SENTENCE_TRANSFORMER: ${USE_SENTENCE_TRANSFORMER:-true}
+      # LLM (Ollama) — runs on the HOST, not in Docker
+      OLLAMA_URL: ${OLLAMA_URL:-http://host.docker.internal:11434}
+      LLM_MODEL: ${LLM_MODEL:-scb10x/llama3.1-typhoon2-8b-instruct}
+      LLM_TIMEOUT: ${LLM_TIMEOUT:-180}
+      LLM_TEMPERATURE: ${LLM_TEMPERATURE:-0.3}
+      # Legacy ML predictor — kept for backward compat
+      USE_SENTENCE_TRANSFORMER: ${USE_SENTENCE_TRANSFORMER:-false}
       WATCHFILES_FORCE_POLLING: "true"
+    extra_hosts:
+      # Required on Linux to reach Ollama on the host; harmless on Mac/Windows.
+      - "host.docker.internal:host-gateway"
     ports:
       - "8000:8000"
     volumes:
       - ./ai-service:/app                     # hot reload source from host
       - /app/venv                             # exclude host venv (if exists)
-      - ai_models:/app/models                 # persist trained model across rebuilds
-      - hf_cache:/root/.cache/huggingface     # cache SBERT download (~90MB)
+      - ai_models:/app/models                 # legacy ML model (optional)
+      - hf_cache:/root/.cache/huggingface     # legacy SBERT cache (optional)
     healthcheck:
       test: ["CMD", "curl", "-f", "http://localhost:8000/health"]
       interval: 15s
       timeout: 10s
       retries: 30
-      start_period: 120s   # allow time for first-run training + SBERT download
+      start_period: 30s
     networks: [chatbot-net]
 
   # ========== Backend (Go) ==========

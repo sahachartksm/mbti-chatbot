@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"net/http"
+	"strings"
 	"time"
 
 	"github.com/go-chi/chi/v5"
@@ -14,13 +15,22 @@ import (
 	"github.com/mbti-chatbot/backend/questions"
 )
 
+// analyzeReq — optional payload: frontend can submit all answers atomically here
+// instead of calling /answer per question. If Answers is empty, we use whatever
+// was already saved in the session.
 type analyzeReq struct {
-	FreeText string `json:"free_text,omitempty"`
+	Answers []analyzeAnswer `json:"answers"`
+}
+
+type analyzeAnswer struct {
+	QuestionID int    `json:"question_id"`
+	Text       string `json:"text"`
 }
 
 // POST /api/session/:id/analyze
 func (h *Handler) Analyze(w http.ResponseWriter, r *http.Request) {
 	sid := chi.URLParam(r, "id")
+
 	var req analyzeReq
 	_ = json.NewDecoder(r.Body).Decode(&req)
 
@@ -34,18 +44,67 @@ func (h *Handler) Analyze(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	if len(s.Answers) < questions.Total() {
-		writeErr(w, 409, "answers incomplete", map[string]any{
-			"answered": len(s.Answers),
+	// If the frontend sent all answers in this call, persist them first.
+	if len(req.Answers) > 0 {
+		for _, a := range req.Answers {
+			if questions.FindByID(a.QuestionID) == nil {
+				continue
+			}
+			ans := models.Answer{
+				QuestionID: a.QuestionID,
+				Question:   questions.TextFor(a.QuestionID, s.Lang),
+				Text:       strings.TrimSpace(a.Text),
+			}
+			if _, err := h.Repo.AddAnswer(r.Context(), sid, ans); err != nil {
+				writeErr(w, 500, "cannot save answer: "+err.Error(), nil)
+				return
+			}
+		}
+		// reload session with all fresh answers
+		s, err = h.Repo.GetSession(r.Context(), sid)
+		if err != nil {
+			writeErr(w, 500, err.Error(), nil)
+			return
+		}
+	}
+
+	// Require at least the expected number of non-empty answers.
+	nonEmpty := 0
+	for _, a := range s.Answers {
+		if strings.TrimSpace(a.Text) != "" {
+			nonEmpty++
+		}
+	}
+	if nonEmpty < questions.Total() {
+		writeErr(w, 409, "please answer all questions", map[string]any{
+			"answered": nonEmpty,
 			"total":    questions.Total(),
 		})
 		return
 	}
 
-	// call AI
-	ctx, cancel := context.WithTimeout(r.Context(), 20*time.Second)
+	// Build QA list in questionID order.
+	qa := make([]ai.QA, 0, len(s.Answers))
+	ordered := make(map[int]models.Answer, len(s.Answers))
+	for _, a := range s.Answers {
+		ordered[a.QuestionID] = a
+	}
+	for _, q := range questions.Questions {
+		a, ok := ordered[q.ID]
+		if !ok {
+			continue
+		}
+		question := a.Question
+		if question == "" {
+			question = questions.TextFor(q.ID, s.Lang)
+		}
+		qa = append(qa, ai.QA{Question: question, Answer: a.Text})
+	}
+
+	// Call LLM. Generous timeout — first call can be slow (model warm-up).
+	ctx, cancel := context.WithTimeout(r.Context(), 200*time.Second)
 	defer cancel()
-	pred, err := h.AI.Predict(ctx, ai.PredictRequest{Answers: s.Answers, FreeText: req.FreeText})
+	pred, err := h.AI.AnalyzeLLM(ctx, ai.AnalyzeLLMRequest{QA: qa, Lang: s.Lang})
 	if err != nil {
 		writeErr(w, 502, "AI service error: "+err.Error(), nil)
 		return
@@ -58,6 +117,7 @@ func (h *Handler) Analyze(w http.ResponseWriter, r *http.Request) {
 		Dimensions:      pred.Dimensions,
 		Confidence:      pred.Confidence,
 		Description:     pred.Description,
+		Analysis:        pred.Analysis,
 		Strengths:       pred.Strengths,
 		Weaknesses:      pred.Weaknesses,
 		Careers:         pred.Careers,

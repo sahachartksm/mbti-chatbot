@@ -25,5 +25,7 @@ ENV PYTHONUNBUFFERED=1
 
 EXPOSE 8000
 
-# Entrypoint: train if model missing, then run uvicorn with hot reload
-CMD ["sh", "-c", "if [ ! -f models/mbti_model.pkl ]; then echo '>> Training model (first start)...'; python train.py; fi; exec uvicorn app:app --host 0.0.0.0 --port 8000 --reload"]
+# Entrypoint: run uvicorn with hot reload.
+# (Legacy rule/ML predictor is optional now — LLM is the primary path.
+#  If you want the legacy /predict endpoint, run `python train.py` once manually.)
+CMD ["sh", "-c", "exec uvicorn app:app --host 0.0.0.0 --port 8000 --reload"]

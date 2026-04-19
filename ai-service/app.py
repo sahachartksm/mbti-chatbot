@@ -1,6 +1,10 @@
 """
-FastAPI app — wraps predictor.
-Run:  uvicorn app:app --reload --port 8000
+FastAPI app — MBTI personality analyzer.
+
+Endpoints:
+  GET  /health        — service health + LLM reachability
+  POST /analyze-llm   — primary: free-text Q&A → LLM psychologist → MBTI
+  POST /predict       — legacy: multiple-choice → rule/ML/SBERT (kept for compat)
 """
 
 import os
@@ -11,9 +15,10 @@ from fastapi import FastAPI, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel, Field
 
-from predictor import predict, load_model, load_sbert, USE_SBERT
+import llm_analyzer
 
 
+# --------- Legacy (MC) request schema ---------
 class AnswerItem(BaseModel):
     question_id: int = Field(..., ge=1, le=20)
     choice_id: str
@@ -24,33 +29,44 @@ class PredictRequest(BaseModel):
     free_text: Optional[str] = None
 
 
+# --------- LLM (free-text) request schema ---------
+class QAItem(BaseModel):
+    question: str
+    answer: str = ""
+
+
+class AnalyzeLLMRequest(BaseModel):
+    qa: List[QAItem] = Field(..., min_length=1)
+    lang: str = "th"
+
+
 @asynccontextmanager
 async def lifespan(app: FastAPI):
-    # Warm-up on startup
+    # LLM health probe (non-blocking)
     try:
-        load_model()
-        print("✓ ML model loaded")
+        info = llm_analyzer.ollama_health()
+        if info.get("reachable") and info.get("model_present"):
+            print(f"✓ Ollama reachable; model '{info['model']}' present")
+        elif info.get("reachable"):
+            print(f"⚠ Ollama reachable but model '{info['model']}' NOT pulled. "
+                  f"Run: ollama pull {info['model']}")
+        else:
+            print(f"⚠ Ollama not reachable at {info.get('url')}: {info.get('error')}")
     except Exception as e:
-        print(f"⚠ Model not loaded: {e}")
-    if USE_SBERT:
-        try:
-            load_sbert()
-            print("✓ Sentence-transformer loaded")
-        except Exception as e:
-            print(f"⚠ SBERT not loaded: {e}")
+        print(f"⚠ Ollama health probe failed: {e}")
     yield
 
 
 app = FastAPI(
     title="MBTI AI Service",
-    version="1.0.0",
-    description="Predicts MBTI personality type from questionnaire answers (optional free text).",
+    version="2.0.0",
+    description="LLM-based MBTI analyzer (primary) + legacy ML predictor.",
     lifespan=lifespan,
 )
 
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"],  # internal service — Go only
+    allow_origins=["*"],  # internal service — called by Go backend only
     allow_methods=["*"],
     allow_headers=["*"],
 )
@@ -58,23 +74,39 @@ app.add_middleware(
 
 @app.get("/health")
 def health():
-    """Health check"""
-    model_loaded = True
-    try:
-        load_model()
-    except Exception:
-        model_loaded = False
-    sbert, _ = load_sbert()
+    """Health check. Reports Ollama / LLM readiness."""
+    info = llm_analyzer.ollama_health()
     return {
         "status": "ok",
-        "model_loaded": model_loaded,
-        "sbert_loaded": sbert is not None,
-        "sbert_enabled": USE_SBERT,
+        "llm_reachable": info.get("reachable", False),
+        "llm_model_present": info.get("model_present", False),
+        "llm_model": info.get("model"),
+        "llm_url": info.get("url"),
+        "llm_ready": info.get("reachable", False) and info.get("model_present", False),
     }
+
+
+@app.post("/analyze-llm")
+def analyze_llm(req: AnalyzeLLMRequest):
+    """Primary endpoint: free-text Q&A → LLM psychologist → structured MBTI."""
+    qa = [{"question": q.question, "answer": q.answer} for q in req.qa]
+    try:
+        result = llm_analyzer.analyze(qa, lang=req.lang)
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=f"invalid LLM output: {e}")
+    except Exception as e:
+        raise HTTPException(status_code=502, detail=f"LLM call failed: {e}")
+    return result
 
 
 @app.post("/predict")
 def do_predict(req: PredictRequest):
+    """Legacy multi-choice predictor (kept for backward compat; not used by new frontend)."""
+    try:
+        from predictor import predict
+    except Exception as e:
+        raise HTTPException(status_code=503, detail=f"legacy predictor unavailable: {e}")
+
     if len(req.answers) < 20:
         raise HTTPException(
             status_code=400,

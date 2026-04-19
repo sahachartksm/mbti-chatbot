@@ -1,3 +1,4 @@
+// Package ai — HTTP client for the Python AI service.
 package ai
 
 import (
@@ -13,22 +14,32 @@ import (
 	"github.com/mbti-chatbot/backend/models"
 )
 
+// Client — abstract AI service (test-friendly).
 type Client interface {
 	Health(ctx context.Context) error
-	Predict(ctx context.Context, req PredictRequest) (*PredictResponse, error)
+	AnalyzeLLM(ctx context.Context, req AnalyzeLLMRequest) (*AnalyzeResponse, error)
 }
 
-type PredictRequest struct {
-	Answers  []models.Answer `json:"answers"`
-	FreeText string          `json:"free_text,omitempty"`
+// QA — one question/answer pair sent to the LLM.
+type QA struct {
+	Question string `json:"question"`
+	Answer   string `json:"answer"`
 }
 
-type PredictResponse struct {
+// AnalyzeLLMRequest — payload for /analyze-llm.
+type AnalyzeLLMRequest struct {
+	QA   []QA   `json:"qa"`
+	Lang string `json:"lang"`
+}
+
+// AnalyzeResponse — shape returned by /analyze-llm (and legacy /predict).
+type AnalyzeResponse struct {
 	MBTIType        string            `json:"mbti_type"`
 	Nickname        string            `json:"nickname"`
 	Dimensions      models.Dimensions `json:"dimensions"`
 	Confidence      float64           `json:"confidence"`
 	Description     string            `json:"description"`
+	Analysis        string            `json:"analysis"`
 	Strengths       []string          `json:"strengths"`
 	Weaknesses      []string          `json:"weaknesses"`
 	Careers         []string          `json:"careers"`
@@ -41,10 +52,12 @@ type httpClient struct {
 	http    *http.Client
 }
 
+// NewClient — construct AI service HTTP client.
+// Timeout is generous because LLM inference can be slow on CPU.
 func NewClient(baseURL string) Client {
 	return &httpClient{
 		baseURL: baseURL,
-		http:    &http.Client{Timeout: 15 * time.Second},
+		http:    &http.Client{Timeout: 200 * time.Second},
 	}
 }
 
@@ -61,12 +74,13 @@ func (c *httpClient) Health(ctx context.Context) error {
 	return nil
 }
 
-func (c *httpClient) Predict(ctx context.Context, req PredictRequest) (*PredictResponse, error) {
+// AnalyzeLLM — send free-text Q&A to AI service; receive structured MBTI.
+func (c *httpClient) AnalyzeLLM(ctx context.Context, req AnalyzeLLMRequest) (*AnalyzeResponse, error) {
 	buf, err := json.Marshal(req)
 	if err != nil {
 		return nil, err
 	}
-	httpReq, err := http.NewRequestWithContext(ctx, "POST", c.baseURL+"/predict", bytes.NewReader(buf))
+	httpReq, err := http.NewRequestWithContext(ctx, "POST", c.baseURL+"/analyze-llm", bytes.NewReader(buf))
 	if err != nil {
 		return nil, err
 	}
@@ -81,7 +95,7 @@ func (c *httpClient) Predict(ctx context.Context, req PredictRequest) (*PredictR
 	if resp.StatusCode != 200 {
 		return nil, errors.New("ai error: " + string(body))
 	}
-	var out PredictResponse
+	var out AnalyzeResponse
 	if err := json.Unmarshal(body, &out); err != nil {
 		return nil, err
 	}

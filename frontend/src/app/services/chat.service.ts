@@ -3,15 +3,12 @@ import { HttpClient } from '@angular/common/http';
 import { Observable } from 'rxjs';
 import { environment } from '../../environments/environment';
 
-export interface Choice {
-  id: string;
-  text: string;
-}
-
+// ----- Server-sent question (open-ended) -----
 export interface Question {
   id: number;
   text: string;
-  choices: Choice[];
+  hint: string;
+  dimension: 'EI' | 'SN' | 'TF' | 'JP' | 'MIX';
 }
 
 export interface StartResponse {
@@ -25,6 +22,12 @@ export interface AnswerResponse {
   ok: boolean;
   answered_count: number;
   total: number;
+}
+
+// ----- Analyze payload -----
+export interface AnalyzeAnswer {
+  question_id: number;
+  text: string;
 }
 
 export interface Dimensions {
@@ -41,6 +44,7 @@ export interface Result {
   dimensions: Dimensions;
   confidence: number;
   description: string;
+  analysis: string;
   strengths: string[];
   weaknesses: string[];
   careers: string[];
@@ -58,16 +62,21 @@ export class ChatService {
     return this.http.post<StartResponse>(`${this.base}/session/start`, { lang });
   }
 
-  answer(sessionId: string, questionId: number, choiceId: string): Observable<AnswerResponse> {
+  /** Save (or overwrite) a single free-text answer for one question. */
+  saveAnswer(sessionId: string, questionId: number, text: string): Observable<AnswerResponse> {
     return this.http.post<AnswerResponse>(`${this.base}/session/${sessionId}/answer`, {
       question_id: questionId,
-      choice_id: choiceId,
+      text,
     });
   }
 
-  analyze(sessionId: string, freeText?: string): Observable<Result> {
+  /**
+   * Submit all answers at once and get MBTI analysis back.
+   * Can be slow (LLM inference) — typically 15-90s on CPU.
+   */
+  analyze(sessionId: string, answers: AnalyzeAnswer[]): Observable<Result> {
     return this.http.post<Result>(`${this.base}/session/${sessionId}/analyze`, {
-      free_text: freeText || '',
+      answers,
     });
   }
 

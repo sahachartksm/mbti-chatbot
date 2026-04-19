@@ -2,6 +2,7 @@
 * { box-sizing: border-box; margin: 0; padding: 0; }
 
 :root {
+  /* Default (non-MBTI) palette — used on home/questionnaire */
   --bg-1: #667eea;
   --bg-2: #764ba2;
   --primary: #6366f1;
@@ -12,8 +13,17 @@
   --card-bg: #ffffff;
   --border: #e5e7eb;
   --shadow-sm: 0 2px 4px rgba(0,0,0,0.05);
-  --shadow-md: 0 10px 30px rgba(0,0,0,0.12);
-  --radius: 16px;
+  --shadow-md: 0 12px 36px rgba(0,0,0,0.14);
+  --radius: 18px;
+
+  /* MBTI theme slots — filled by mbti-colors.ts on the result page */
+  --mbti-primary: var(--primary);
+  --mbti-primary-dark: var(--primary-dark);
+  --mbti-accent: var(--accent);
+  --mbti-bg-from: var(--bg-1);
+  --mbti-bg-to: var(--bg-2);
+  --mbti-card-tint: rgba(99,102,241,0.08);
+  --mbti-badge-text: #ffffff;
 }
 
 html, body { height: 100%; }
@@ -25,6 +35,12 @@ body {
   min-height: 100vh;
   line-height: 1.6;
   -webkit-font-smoothing: antialiased;
+  transition: background 0.6s ease;
+}
+
+/* When a result page sets an MBTI theme, the whole page background shifts */
+html[data-mbti-group] body {
+  background: linear-gradient(135deg, var(--mbti-bg-from) 0%, var(--mbti-bg-to) 100%);
 }
 
 button {
@@ -33,11 +49,7 @@ button {
   border: none;
   transition: all 0.2s ease;
 }
-
-button:disabled {
-  cursor: not-allowed;
-  opacity: 0.5;
-}
+button:disabled { cursor: not-allowed; opacity: 0.5; }
 
 .btn {
   padding: 12px 28px;
@@ -47,7 +59,10 @@ button:disabled {
   background: var(--primary);
   color: white;
 }
-.btn:hover:not(:disabled) { background: var(--primary-dark); transform: translateY(-1px); }
+.btn:hover:not(:disabled) {
+  background: var(--primary-dark);
+  transform: translateY(-1px);
+}
 
 .btn-secondary {
   background: white;
@@ -61,9 +76,14 @@ button:disabled {
   border-radius: var(--radius);
   box-shadow: var(--shadow-md);
   padding: 32px;
+  animation: fadeUp 0.5s cubic-bezier(0.22, 1, 0.36, 1);
+}
+@keyframes fadeUp {
+  from { opacity: 0; transform: translateY(14px); }
+  to { opacity: 1; transform: translateY(0); }
 }
 
-/* util */
+/* utility */
 .flex { display: flex; }
 .flex-col { display: flex; flex-direction: column; }
 .items-center { align-items: center; }
@@ -75,3 +95,7 @@ button:disabled {
 /* scrollbar */
 ::-webkit-scrollbar { width: 8px; height: 8px; }
 ::-webkit-scrollbar-thumb { background: rgba(0,0,0,0.2); border-radius: 4px; }
+::-webkit-scrollbar-thumb:hover { background: rgba(0,0,0,0.35); }
+
+/* Textarea & input resets for forms */
+textarea, input { font-family: inherit; color: inherit; }

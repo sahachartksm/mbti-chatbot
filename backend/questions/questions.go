@@ -1,54 +1,44 @@
+// Package questions — 10 open-ended interview questions for LLM-based MBTI analysis.
+// คำถามปลายเปิด 10 ข้อ ครอบคลุมทั้ง 4 มิติของ MBTI (EI / SN / TF / JP)
+// ผู้ใช้พิมพ์คำตอบเป็นข้อความอิสระ (ไทย / อังกฤษ)
 package questions
 
-// Question — คำถาม 1 ข้อ
-type Question struct {
-	ID      int       `json:"id"`
-	Text    LangText  `json:"text"`
-	Choices []Choice  `json:"choices"`
-	Mapping []Mapping `json:"-"` // ไม่ส่งให้ frontend
-}
-
+// LangText — bilingual text
 type LangText struct {
 	TH string `json:"th"`
 	EN string `json:"en"`
 }
 
-type Choice struct {
-	ID   string   `json:"id"`
-	Text LangText `json:"text"`
+// Question — คำถามปลายเปิด 1 ข้อ
+type Question struct {
+	ID       int      `json:"id"`
+	Text     LangText `json:"text"`
+	Hint     LangText `json:"hint"`     // คำแนะนำช่วยตอบ
+	Dimension string  `json:"dimension"` // "EI" | "SN" | "TF" | "JP" | "MIX"
 }
 
-// Mapping — เมื่อเลือก choice นี้ ให้บวกคะแนนฝั่งใดของ dimension ใด เท่าไหร่
-type Mapping struct {
-	Choice    string  // "a"
-	Dim       string  // "EI" | "SN" | "TF" | "JP"
-	Direction string  // "E" | "I" | "S" | "N" | ...
-	Weight    float64 // 0.5 | 1.0
-}
-
-// ClientView — version ที่จะ serialize ให้ frontend ตาม lang
+// ClientQuestion — shape ที่ส่งให้ frontend ตามภาษา
 type ClientQuestion struct {
-	ID      int            `json:"id"`
-	Text    string         `json:"text"`
-	Choices []ClientChoice `json:"choices"`
-}
-type ClientChoice struct {
-	ID   string `json:"id"`
-	Text string `json:"text"`
+	ID        int    `json:"id"`
+	Text      string `json:"text"`
+	Hint      string `json:"hint"`
+	Dimension string `json:"dimension"`
 }
 
-// ToClientView — แปลง Questions → client view ตามภาษา
+// ToClientView — serialize ตาม lang
 func ToClientView(lang string) []ClientQuestion {
 	out := make([]ClientQuestion, 0, len(Questions))
 	for _, q := range Questions {
-		cq := ClientQuestion{ID: q.ID, Text: pick(q.Text, lang)}
-		for _, c := range q.Choices {
-			cq.Choices = append(cq.Choices, ClientChoice{ID: c.ID, Text: pick(c.Text, lang)})
-		}
-		out = append(out, cq)
+		out = append(out, ClientQuestion{
+			ID:        q.ID,
+			Text:      pick(q.Text, lang),
+			Hint:      pick(q.Hint, lang),
+			Dimension: q.Dimension,
+		})
 	}
 	return out
 }
+
 func pick(t LangText, lang string) string {
 	if lang == "en" {
 		return t.EN
@@ -56,342 +46,150 @@ func pick(t LangText, lang string) string {
 	return t.TH
 }
 
-// Total returns total number of questions
+// Total — จำนวนคำถามทั้งหมด
 func Total() int { return len(Questions) }
 
-// FindChoice returns mapping for (questionID, choiceID) or nil
-func FindChoice(qid int, choice string) *Mapping {
-	for _, q := range Questions {
-		if q.ID != qid {
-			continue
-		}
-		for _, m := range q.Mapping {
-			if m.Choice == choice {
-				return &m
-			}
+// FindByID returns the question with the given ID, or nil.
+func FindByID(id int) *Question {
+	for i := range Questions {
+		if Questions[i].ID == id {
+			return &Questions[i]
 		}
 	}
 	return nil
 }
 
-// ------------ Question Bank (20 ข้อ, 5 คำถาม × 4 dimensions) ------------
+// TextFor returns the question's text in the given language, or empty if not found.
+func TextFor(id int, lang string) string {
+	if q := FindByID(id); q != nil {
+		return pick(q.Text, lang)
+	}
+	return ""
+}
+
+// ----------------------- Question Bank (10 ข้อ) -----------------------
 
 var Questions = []Question{
-	// -------- EI (5 คำถาม) --------
 	{
-		ID: 1,
+		ID:        1,
+		Dimension: "EI",
 		Text: LangText{
-			TH: "ในงานปาร์ตี้ คุณมักจะ...",
-			EN: "At a party, you tend to...",
+			TH: "เล่าให้ฟังว่าคุณชอบใช้เวลาว่างอย่างไร และคุณ “ชาร์จพลัง” ได้ดีที่สุดในสถานการณ์แบบไหน?",
+			EN: "Tell me how you like to spend your free time, and in what kind of situation do you feel most recharged?",
 		},
-		Choices: []Choice{
-			{"a", LangText{"เข้าหาและพูดคุยกับคนใหม่ๆ", "Approach and chat with new people"}},
-			{"b", LangText{"คุยกับเพื่อนสนิทไม่กี่คน", "Talk with a few close friends"}},
-			{"c", LangText{"สังเกตดูเป็นหลัก", "Mostly observe"}},
-		},
-		Mapping: []Mapping{
-			{"a", "EI", "E", 1.0},
-			{"b", "EI", "I", 0.5},
-			{"c", "EI", "I", 1.0},
+		Hint: LangText{
+			TH: "ลองเล่าถึงกิจกรรมจริง ๆ เช่น อยู่คนเดียว / อยู่กับเพื่อน / ออกไปข้างนอก / ทำงานอดิเรก",
+			EN: "Concrete activities help — e.g. alone, with friends, going out, hobbies.",
 		},
 	},
 	{
-		ID: 2,
+		ID:        2,
+		Dimension: "EI",
 		Text: LangText{
-			TH: "หลังวันทำงานเหนื่อยๆ คุณชาร์จพลังโดย...",
-			EN: "After a tiring workday, you recharge by...",
+			TH: "คุณรู้สึกอย่างไรเวลาต้องพบคนใหม่หรือเข้าสังคมกลุ่มใหญ่? ยกตัวอย่างเหตุการณ์ล่าสุดที่จำได้",
+			EN: "How do you feel about meeting new people or being in large social gatherings? Share a recent real example.",
 		},
-		Choices: []Choice{
-			{"a", LangText{"ออกไปเจอเพื่อน", "Going out with friends"}},
-			{"b", LangText{"อยู่บ้านคนเดียวเงียบๆ", "Staying alone at home"}},
-		},
-		Mapping: []Mapping{
-			{"a", "EI", "E", 1.0},
-			{"b", "EI", "I", 1.0},
+		Hint: LangText{
+			TH: "เล่าเหตุการณ์จริง อารมณ์ที่เกิดขึ้น และคุณทำอะไรไปบ้าง",
+			EN: "Describe what happened, what you felt, and how you acted.",
 		},
 	},
 	{
-		ID: 3,
+		ID:        3,
+		Dimension: "SN",
 		Text: LangText{
-			TH: "ในประชุมทีม คุณมักจะ...",
-			EN: "In team meetings, you usually...",
+			TH: "เวลาเจอปัญหาหรือสิ่งใหม่ ๆ ที่ไม่เคยเจอ คุณเริ่มต้นคิดและจัดการอย่างไร? ยกตัวอย่างประกอบ",
+			EN: "When you face a brand-new problem, how do you start thinking and approaching it? Give an example.",
 		},
-		Choices: []Choice{
-			{"a", LangText{"พูดแสดงความคิดเห็นบ่อย", "Speak up frequently"}},
-			{"b", LangText{"ฟังและพูดเมื่อจำเป็น", "Listen and speak only when necessary"}},
-		},
-		Mapping: []Mapping{
-			{"a", "EI", "E", 1.0},
-			{"b", "EI", "I", 1.0},
+		Hint: LangText{
+			TH: "เจาะที่ขั้นตอนแรก ๆ เช่น หาข้อมูล วางแผน ลองทำ หรือคิดภาพรวมก่อน",
+			EN: "Focus on your first steps — research, plan, experiment, or see the big picture.",
 		},
 	},
 	{
-		ID: 4,
+		ID:        4,
+		Dimension: "SN",
 		Text: LangText{
-			TH: "คุณรู้สึกอย่างไรกับการพูดคุยกับคนแปลกหน้า?",
-			EN: "How do you feel about talking to strangers?",
+			TH: "คุณชอบเรียนรู้สิ่งใหม่แบบไหนมากกว่า — จากข้อเท็จจริงที่จับต้องได้และตัวอย่างจริง หรือจากแนวคิด ทฤษฎี และความเป็นไปได้?",
+			EN: "Which way do you prefer to learn — from concrete facts and real examples, or from concepts, theories, and possibilities?",
 		},
-		Choices: []Choice{
-			{"a", LangText{"สนุก ชอบ", "Fun and enjoyable"}},
-			{"b", LangText{"เฉยๆ ขึ้นอยู่กับสถานการณ์", "Neutral, depends on situation"}},
-			{"c", LangText{"รู้สึกเครียดเล็กน้อย", "Slightly stressful"}},
-		},
-		Mapping: []Mapping{
-			{"a", "EI", "E", 1.0},
-			{"b", "EI", "I", 0.3},
-			{"c", "EI", "I", 1.0},
+		Hint: LangText{
+			TH: "อธิบายเหตุผล และยกตัวอย่างเรื่องที่เคยเรียนรู้แล้วสนุก",
+			EN: "Explain why, and give an example of a topic you enjoyed learning.",
 		},
 	},
 	{
-		ID: 5,
+		ID:        5,
+		Dimension: "TF",
 		Text: LangText{
-			TH: "ถ้าเลือกวันหยุดได้ คุณจะ...",
-			EN: "If you could choose your weekend, you would...",
+			TH: "เล่าถึงการตัดสินใจสำคัญครั้งล่าสุดของคุณ คุณใช้อะไรเป็นเกณฑ์หลัก และผลลัพธ์เป็นอย่างไร?",
+			EN: "Tell me about a recent important decision you made. What was your main criterion, and how did it turn out?",
 		},
-		Choices: []Choice{
-			{"a", LangText{"ออกไปเที่ยวกับกลุ่มเพื่อน", "Go out with a group of friends"}},
-			{"b", LangText{"อ่านหนังสือหรือดูหนังอยู่บ้าน", "Read or watch movies at home"}},
-		},
-		Mapping: []Mapping{
-			{"a", "EI", "E", 1.0},
-			{"b", "EI", "I", 1.0},
-		},
-	},
-
-	// -------- SN (5 คำถาม) --------
-	{
-		ID: 6,
-		Text: LangText{
-			TH: "เวลาเรียนรู้สิ่งใหม่ คุณชอบ...",
-			EN: "When learning something new, you prefer...",
-		},
-		Choices: []Choice{
-			{"a", LangText{"ขั้นตอนชัดเจน ตัวอย่างจริง", "Clear steps and concrete examples"}},
-			{"b", LangText{"เข้าใจหลักการและภาพรวม", "Understanding principles and big picture"}},
-		},
-		Mapping: []Mapping{
-			{"a", "SN", "S", 1.0},
-			{"b", "SN", "N", 1.0},
+		Hint: LangText{
+			TH: "ลองชี้ว่าคุณชั่งน้ำหนัก “ตรรกะและข้อมูล” หรือ “ผลกระทบต่อคน / ความรู้สึก” มากกว่ากัน",
+			EN: "Point out whether you weighed logic/data or people/feelings more.",
 		},
 	},
 	{
-		ID: 7,
+		ID:        6,
+		Dimension: "TF",
 		Text: LangText{
-			TH: "คุณสนใจ...",
-			EN: "You are more interested in...",
+			TH: "เวลาเพื่อนสนิทมาปรึกษาเรื่องหนักใจ คุณตอบสนองและให้คำแนะนำแบบไหน?",
+			EN: "When a close friend confides a difficult problem, how do you respond and advise?",
 		},
-		Choices: []Choice{
-			{"a", LangText{"รายละเอียดที่จับต้องได้", "Tangible details"}},
-			{"b", LangText{"ความเป็นไปได้และไอเดียใหม่", "Possibilities and new ideas"}},
-		},
-		Mapping: []Mapping{
-			{"a", "SN", "S", 1.0},
-			{"b", "SN", "N", 1.0},
+		Hint: LangText{
+			TH: "โฟกัสว่าคุณมักเสนอ “ทางแก้” ก่อน หรือ “รับฟังและอยู่ข้าง ๆ” ก่อน",
+			EN: "Do you usually offer solutions first, or listen and be present first?",
 		},
 	},
 	{
-		ID: 8,
+		ID:        7,
+		Dimension: "JP",
 		Text: LangText{
-			TH: "เพื่อนบอกว่าคุณเป็นคน...",
-			EN: "Friends describe you as someone who is...",
+			TH: "คุณจัดการชีวิตประจำวันและเป้าหมายระยะยาวอย่างไร? วางแผนล่วงหน้าเยอะแค่ไหน?",
+			EN: "How do you manage your daily life and long-term goals? How far ahead do you plan?",
 		},
-		Choices: []Choice{
-			{"a", LangText{"ปฏิบัติจริง ไม่ฟุ้ง", "Practical and grounded"}},
-			{"b", LangText{"ช่างจินตนาการ", "Imaginative"}},
-			{"c", LangText{"ทั้งสองอย่างพอๆ กัน", "Both equally"}},
-		},
-		Mapping: []Mapping{
-			{"a", "SN", "S", 1.0},
-			{"b", "SN", "N", 1.0},
-			{"c", "SN", "N", 0.3},
+		Hint: LangText{
+			TH: "พูดถึงการทำ list, ปฏิทิน, deadline, routine หรือวิธีที่คุณใช้จริง ๆ",
+			EN: "Mention to-do lists, calendars, deadlines, routines, or how you actually operate.",
 		},
 	},
 	{
-		ID: 9,
+		ID:        8,
+		Dimension: "JP",
 		Text: LangText{
-			TH: "เวลาทำโปรเจค คุณให้ความสำคัญกับ...",
-			EN: "When working on a project, you focus on...",
+			TH: "คุณรู้สึกอย่างไรเมื่อแผนเปลี่ยนกะทันหัน หรือเจอสถานการณ์ที่ไม่แน่นอน? คุณรับมืออย่างไร?",
+			EN: "How do you feel when plans change suddenly or when a situation is uncertain? How do you cope?",
 		},
-		Choices: []Choice{
-			{"a", LangText{"การทำปัจจุบันให้ดี", "Doing the present task well"}},
-			{"b", LangText{"วิสัยทัศน์ระยะยาว", "Long-term vision"}},
-		},
-		Mapping: []Mapping{
-			{"a", "SN", "S", 1.0},
-			{"b", "SN", "N", 1.0},
+		Hint: LangText{
+			TH: "เล่าเหตุการณ์จริง ปฏิกิริยาในใจ และการกระทำที่ตามมา",
+			EN: "Describe a real scenario, your inner reaction, and what you did.",
 		},
 	},
 	{
-		ID: 10,
+		ID:        9,
+		Dimension: "MIX",
 		Text: LangText{
-			TH: "ข้อความไหนใกล้เคียงกับคุณมากกว่า?",
-			EN: "Which statement is closer to you?",
+			TH: "อธิบายจุดแข็ง 3 อย่าง และจุดอ่อน 3 อย่างของตัวคุณเองอย่างตรงไปตรงมา พร้อมตัวอย่างจากชีวิตจริง",
+			EN: "Honestly list 3 of your strengths and 3 of your weaknesses, with real-life examples.",
 		},
-		Choices: []Choice{
-			{"a", LangText{"เชื่อในสิ่งที่เห็นและจับต้องได้", "Believe what you can see and touch"}},
-			{"b", LangText{"สนใจความหมายที่ซ่อนอยู่", "Interested in hidden meanings"}},
-		},
-		Mapping: []Mapping{
-			{"a", "SN", "S", 1.0},
-			{"b", "SN", "N", 1.0},
-		},
-	},
-
-	// -------- TF (5 คำถาม) --------
-	{
-		ID: 11,
-		Text: LangText{
-			TH: "เวลาตัดสินใจเรื่องสำคัญ คุณพึ่ง...",
-			EN: "When making important decisions, you rely on...",
-		},
-		Choices: []Choice{
-			{"a", LangText{"ตรรกะและข้อมูล", "Logic and data"}},
-			{"b", LangText{"ความรู้สึกและผลต่อคน", "Feelings and impact on people"}},
-		},
-		Mapping: []Mapping{
-			{"a", "TF", "T", 1.0},
-			{"b", "TF", "F", 1.0},
+		Hint: LangText{
+			TH: "ตรงไปตรงมา ไม่ต้องสวยหรู เพราะจะช่วยให้การวิเคราะห์แม่นยำขึ้น",
+			EN: "Be candid — honesty improves the accuracy of the analysis.",
 		},
 	},
 	{
-		ID: 12,
+		ID:        10,
+		Dimension: "MIX",
 		Text: LangText{
-			TH: "เพื่อนร้องไห้เล่าเรื่องเศร้าให้ฟัง คุณมักจะ...",
-			EN: "A friend cries about their sad story, you tend to...",
+			TH: "ในอีก 5-10 ปีข้างหน้า คุณอยากเป็นคนแบบไหน? มีค่านิยมอะไรที่คุณให้ความสำคัญที่สุด?",
+			EN: "In the next 5-10 years, who do you want to become? What values matter most to you?",
 		},
-		Choices: []Choice{
-			{"a", LangText{"เสนอวิธีแก้ปัญหา", "Offer solutions"}},
-			{"b", LangText{"โอบกอดและรับฟัง", "Hug and listen"}},
-		},
-		Mapping: []Mapping{
-			{"a", "TF", "T", 1.0},
-			{"b", "TF", "F", 1.0},
-		},
-	},
-	{
-		ID: 13,
-		Text: LangText{
-			TH: "คุณเคารพคน...",
-			EN: "You respect people who are...",
-		},
-		Choices: []Choice{
-			{"a", LangText{"ฉลาด มีเหตุผล", "Smart and logical"}},
-			{"b", LangText{"อบอุ่น เห็นใจผู้อื่น", "Warm and empathetic"}},
-		},
-		Mapping: []Mapping{
-			{"a", "TF", "T", 1.0},
-			{"b", "TF", "F", 1.0},
-		},
-	},
-	{
-		ID: 14,
-		Text: LangText{
-			TH: "ถ้าต้องวิจารณ์งานเพื่อน คุณจะ...",
-			EN: "When critiquing a friend's work, you...",
-		},
-		Choices: []Choice{
-			{"a", LangText{"บอกตรงๆ เพื่อพัฒนา", "Tell them directly to improve"}},
-			{"b", LangText{"นุ่มนวล รักษาความรู้สึก", "Be gentle, preserve feelings"}},
-			{"c", LangText{"ตรงไปตรงมาแต่ใส่ใจคำพูด", "Direct but mindful of words"}},
-		},
-		Mapping: []Mapping{
-			{"a", "TF", "T", 1.0},
-			{"b", "TF", "F", 1.0},
-			{"c", "TF", "T", 0.4},
-		},
-	},
-	{
-		ID: 15,
-		Text: LangText{
-			TH: "ในการประชุม สิ่งที่สำคัญที่สุดคือ...",
-			EN: "In a meeting, the most important thing is...",
-		},
-		Choices: []Choice{
-			{"a", LangText{"การตัดสินใจที่ถูกต้อง", "Making the right decision"}},
-			{"b", LangText{"ทุกคนรู้สึกได้รับการรับฟัง", "Everyone feels heard"}},
-		},
-		Mapping: []Mapping{
-			{"a", "TF", "T", 1.0},
-			{"b", "TF", "F", 1.0},
-		},
-	},
-
-	// -------- JP (5 คำถาม) --------
-	{
-		ID: 16,
-		Text: LangText{
-			TH: "เวลาเดินทาง คุณมักจะ...",
-			EN: "When traveling, you usually...",
-		},
-		Choices: []Choice{
-			{"a", LangText{"วางแผนทุกวันล่วงหน้า", "Plan every day in advance"}},
-			{"b", LangText{"ตัดสินใจหน้างาน", "Decide on the spot"}},
-		},
-		Mapping: []Mapping{
-			{"a", "JP", "J", 1.0},
-			{"b", "JP", "P", 1.0},
-		},
-	},
-	{
-		ID: 17,
-		Text: LangText{
-			TH: "โต๊ะทำงานของคุณ...",
-			EN: "Your workspace is...",
-		},
-		Choices: []Choice{
-			{"a", LangText{"เป็นระเบียบเสมอ", "Always organized"}},
-			{"b", LangText{"รกตามความคิดสร้างสรรค์", "Messy, creatively"}},
-			{"c", LangText{"ผสมๆ แล้วแต่ช่วง", "Mixed, depends"}},
-		},
-		Mapping: []Mapping{
-			{"a", "JP", "J", 1.0},
-			{"b", "JP", "P", 1.0},
-			{"c", "JP", "P", 0.4},
-		},
-	},
-	{
-		ID: 18,
-		Text: LangText{
-			TH: "Deadlines คุณ...",
-			EN: "With deadlines, you...",
-		},
-		Choices: []Choice{
-			{"a", LangText{"ทำเสร็จก่อนเวลาเสมอ", "Always finish ahead of time"}},
-			{"b", LangText{"ทำนาทีสุดท้ายได้ดีที่สุด", "Work best at the last minute"}},
-		},
-		Mapping: []Mapping{
-			{"a", "JP", "J", 1.0},
-			{"b", "JP", "P", 1.0},
-		},
-	},
-	{
-		ID: 19,
-		Text: LangText{
-			TH: "คุณรู้สึกอย่างไรเมื่อแผนเปลี่ยนกระทันหัน?",
-			EN: "How do you feel about sudden plan changes?",
-		},
-		Choices: []Choice{
-			{"a", LangText{"ไม่ชอบ กระทบ routine", "Dislike it, disrupts routine"}},
-			{"b", LangText{"ตื่นเต้น ชอบสิ่งใหม่", "Excited, love surprises"}},
-		},
-		Mapping: []Mapping{
-			{"a", "JP", "J", 1.0},
-			{"b", "JP", "P", 1.0},
-		},
-	},
-	{
-		ID: 20,
-		Text: LangText{
-			TH: "ข้อความที่ตรงกับคุณที่สุด...",
-			EN: "Which fits you best...",
-		},
-		Choices: []Choice{
-			{"a", LangText{"ตัดสินใจเร็ว เดินหน้า", "Decide quickly, move on"}},
-			{"b", LangText{"เปิดทางเลือกไว้ก่อน", "Keep options open"}},
-		},
-		Mapping: []Mapping{
-			{"a", "JP", "J", 1.0},
-			{"b", "JP", "P", 1.0},
+		Hint: LangText{
+			TH: "เล่าความฝัน ค่านิยม และสิ่งที่คุณไม่ยอมประนีประนอม",
+			EN: "Share your dreams, values, and what you refuse to compromise on.",
 		},
 	},
 }
+
+// โหมดเดิม (20 ข้อ multiple-choice) ถูกลบ — ใช้ 10 ข้อปลายเปิด + LLM แทน

@@ -6,12 +6,16 @@ export const routes: Routes = [
     loadComponent: () => import('./components/home/home.component').then((m) => m.HomeComponent),
   },
   {
-    path: 'chat/:sessionId',
-    loadComponent: () => import('./components/chat/chat.component').then((m) => m.ChatComponent),
+    path: 'questionnaire/:sessionId',
+    loadComponent: () =>
+      import('./components/questionnaire/questionnaire.component').then(
+        (m) => m.QuestionnaireComponent,
+      ),
   },
   {
     path: 'result/:sessionId',
-    loadComponent: () => import('./components/result/result.component').then((m) => m.ResultComponent),
+    loadComponent: () =>
+      import('./components/result/result.component').then((m) => m.ResultComponent),
   },
   { path: '**', redirectTo: '' },
 ];

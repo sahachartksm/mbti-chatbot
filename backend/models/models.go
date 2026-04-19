@@ -2,13 +2,14 @@ package models
 
 import "time"
 
-// Answer — คำตอบ 1 ข้อ
+// Answer — คำตอบข้อความอิสระ 1 ข้อ
 type Answer struct {
 	QuestionID int    `json:"question_id" bson:"question_id"`
-	ChoiceID   string `json:"choice_id"   bson:"choice_id"`
+	Question   string `json:"question"    bson:"question"`
+	Text       string `json:"text"        bson:"text"`
 }
 
-// Session — เก็บ state ของ 1 ผู้ทำแบบทดสอบ
+// Session — เก็บ state ของผู้ทำแบบทดสอบ 1 คน
 type Session struct {
 	SessionID  string    `json:"session_id"  bson:"session_id"`
 	Lang       string    `json:"lang"        bson:"lang"`
@@ -18,7 +19,7 @@ type Session struct {
 	AnalyzedAt time.Time `json:"analyzed_at,omitempty" bson:"analyzed_at,omitempty"`
 }
 
-// Dimensions — คะแนน % ของแต่ละขั้ว
+// Dimensions — คะแนน % ของแต่ละขั้ว (รวมคู่ = 100)
 type Dimensions struct {
 	E int `json:"E" bson:"E"`
 	I int `json:"I" bson:"I"`
@@ -30,7 +31,7 @@ type Dimensions struct {
 	P int `json:"P" bson:"P"`
 }
 
-// Result — ผลวิเคราะห์
+// Result — ผลวิเคราะห์ MBTI
 type Result struct {
 	SessionID       string     `json:"session_id"       bson:"session_id"`
 	MBTIType        string     `json:"mbti_type"        bson:"mbti_type"`
@@ -38,6 +39,7 @@ type Result struct {
 	Dimensions      Dimensions `json:"dimensions"       bson:"dimensions"`
 	Confidence      float64    `json:"confidence"       bson:"confidence"`
 	Description     string     `json:"description"      bson:"description"`
+	Analysis        string     `json:"analysis"         bson:"analysis"` // LLM deep-dive commentary
 	Strengths       []string   `json:"strengths"        bson:"strengths"`
 	Weaknesses      []string   `json:"weaknesses"       bson:"weaknesses"`
 	Careers         []string   `json:"careers"          bson:"careers"`
