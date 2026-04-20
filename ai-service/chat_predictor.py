@@ -7,6 +7,7 @@ Chat-mode MBTI predictor — Psychometrics Expert Mode.
 """
 
 from __future__ import annotations
+import re
 from typing import List, Dict, Set
 
 import gemini_client
@@ -27,6 +28,52 @@ _INVALID_TOKENS: set = {
     "ไม่แน่ใจ", "ไม่รู้สิ", "ไม่ทราบ", "pass", "ผ่าน", "next", "ต่อไป",
 }
 
+# Thai vowel / tone-mark codepoints — real Thai words ALWAYS contain at least one
+# Gibberish keyboard mashing (home row: ฟหกดเ / ผปแอ / etc.) produces consonants only
+_THAI_VOWEL_CHARS: frozenset = frozenset(
+    # sara above/below/following: ะ ั า ำ ิ ี ึ ื ุ ู ฺ
+    '\u0e30\u0e31\u0e32\u0e33\u0e34\u0e35\u0e36\u0e37\u0e38\u0e39\u0e3a'
+    # leading standalone vowels: เ แ โ ใ ไ
+    '\u0e40\u0e41\u0e42\u0e43\u0e44'
+    # ็ (mai tai khu — vowel shortener)
+    '\u0e47'
+    # tone marks: ่ ้ ๊ ๋
+    '\u0e48\u0e49\u0e4a\u0e4b'
+    # ์ (thanthakhat — silent-consonant marker, appears in real words)
+    '\u0e4c'
+)
+
+# English QWERTY keyboard rows — to catch row-mashing (asdfgh, qwerty, etc.)
+_QWERTY_ROWS: tuple = (
+    frozenset('qwertyuiop'),
+    frozenset('asdfghjkl'),
+    frozenset('zxcvbnm'),
+)
+
+# Thai Kedmanee keyboard rows — to catch Thai row-mashing (e.g. "หกฟด่าส" = asdf+jkl)
+# Row A (asdfghjkl;'): ฟหกดเ้่าสวง
+# Row Q (qwertyuiop[]): ๆไำพะัีรนยบล
+# Row Z (zxcvbnm,./):  ผปแอิืทมใฝ
+_THAI_KB_ROWS: tuple = (
+    frozenset('ฟหกดเ้่าสวง'),
+    frozenset('ๆไำพะัีรนยบล'),
+    frozenset('ผปแอิืทมใฝ'),
+)
+
+# Thai text that starts with a following-sara, sara am, or tone mark = always invalid input
+# ำ (sara am) included: legitimate Thai sentences never begin with it
+_STARTS_WITH_SARA_RE = re.compile(r'^[ะาิีึืุูัำ็่้๊๋์]')
+# Explicit home-row blacklist — pure-consonant runs that are never real Thai words
+# Subset only (other patterns already caught by row/consonant-run rules above)
+_HOME_ROW_BLACKLIST: frozenset = frozenset({
+    # Row A consecutive consonant substrings (asdf / asdfg / etc.)
+    'ฟหกด', 'หกดส', 'กดสว', 'ดสวง',
+    # Row A scrambled versions
+    'ฟดหก', 'ฟดกห', 'หดฟก', 'กฟหด',
+    # Row Z runs
+    'ผปแอ', 'ทมใฝ',
+})
+
 
 # ── Fallback helpers ──────────────────────────────────────────────────────────
 
@@ -37,6 +84,89 @@ def _is_valid_response(text: str) -> bool:
         return False
     if stripped.lower() in _INVALID_TOKENS:
         return False
+    return True
+
+
+def validate_user_input(text: str) -> bool:
+    """
+    Hard gate ก่อนส่ง Gemini — ตรวจจับ keyboard mashing ด้วย Python ล้วนๆ
+    Return True  = ผ่านเกณฑ์ → ส่งให้ Gemini ประมวลผลต่อ
+    Return False = ขยะ/gibberish → คืน error ทันที ไม่เรียก Gemini เด็ดขาด
+
+    Design principle: ดักเฉพาะสิ่งที่ชัวร์ 100% ว่าเป็น gibberish
+    ข้อความที่ยาวพอและไม่ชัดเจน → ส่ง Gemini ต่อ (Gemini ประเมินได้ดีกว่า Python regex)
+    """
+    stripped = text.strip()
+
+    # 1. Too short to be meaningful
+    if len(stripped) < 2:
+        return False
+
+    # 2. Known meaningless single-token responses
+    if stripped.lower() in _INVALID_TOKENS:
+        return False
+
+    # 3. Repeated char spam — 4+ same chars in a row (กกกก, 5555, aaaa)
+    if re.search(r'(.)\1{3,}', stripped):
+        return False
+
+    # 4. Only 1–2 distinct non-space chars across a long string
+    if len(set(stripped.replace(' ', ''))) <= 2 and len(stripped) > 5:
+        return False
+
+    thai_chars = [c for c in stripped if '\u0e00' <= c <= '\u0e7f']
+    has_thai = bool(thai_chars)
+    has_latin = any(c.isalpha() and ord(c) < 128 for c in stripped)
+    has_digits = any(c.isdigit() for c in stripped)
+
+    # Whitelist: mixed Thai + English/numbers ที่ยาวพอ
+    # คำตอบจริงมักผสมภาษา เช่น "ทำเสร็จก่อน deadline", "ทำงาน part time"
+    # → ตรวจแค่ blacklist แล้วส่ง Gemini ต่อ ไม่ต้องผ่าน Thai-structure rules
+    if has_thai and (has_latin or has_digits) and len(stripped) >= 6:
+        if any(pat in stripped for pat in _HOME_ROW_BLACKLIST):
+            return False
+        return True
+
+    # ── Thai-only checks ──────────────────────────────────────────────────────
+
+    if has_thai and len(thai_chars) >= 4:
+        # 5. Zero vowels/tone-marks = pure consonant gibberish
+        if sum(1 for c in thai_chars if c in _THAI_VOWEL_CHARS) == 0:
+            return False
+
+        # 6. All Thai chars from a single Kedmanee keyboard row = row-mashing
+        if any(set(thai_chars).issubset(row) for row in _THAI_KB_ROWS):
+            return False
+
+        # 10. 5+ consecutive Thai consonants without any vowel break
+        #     Valid Thai (even loanwords) rarely exceeds 3–4; 5+ = gibberish
+        consonant_run = 0
+        for c in thai_chars:
+            if c not in _THAI_VOWEL_CHARS:
+                consonant_run += 1
+                if consonant_run >= 5:
+                    return False
+            else:
+                consonant_run = 0
+
+        # 12. Starts with following-sara, sara am, or tone mark
+        #     Valid Thai input always starts with a consonant or leading vowel (เแโใไ)
+        if _STARTS_WITH_SARA_RE.search(stripped):
+            return False
+
+    # ── Latin-only checks ─────────────────────────────────────────────────────
+
+    if has_latin and not has_thai:
+        alpha_only = [c.lower() for c in stripped if c.isalpha() and ord(c) < 128]
+        # 9. QWERTY keyboard-row mashing (asdfgh, qwerty, zxcvb, etc.)
+        if len(alpha_only) >= 4:
+            if any(set(alpha_only).issubset(row) for row in _QWERTY_ROWS):
+                return False
+
+    # 14. Explicit home-row substring blacklist — final safety net
+    if any(pat in stripped for pat in _HOME_ROW_BLACKLIST):
+        return False
+
     return True
 
 
@@ -102,14 +232,37 @@ def analyze(turns: List[Dict], user_turn_count: int, api_key: str | None = None)
     Fallback mode:
       - keyword/SBERT → show_result เมื่อ turns ≥ 10 AND confidence ≥ 80%
     """
+    # ── Hard gate: Python pre-validation ก่อนเรียก Gemini ───────────────────────
+    # ไม่ผ่าน validate_user_input → return ทันที ไม่แตะ Gemini API เลย
+    last_user_text = next((t["text"] for t in reversed(turns) if t["role"] == "user"), "")
+    if not validate_user_input(last_user_text):
+        last_ai_text = next((t["text"] for t in reversed(turns) if t["role"] == "ai"), "")
+        # Compute scores from valid history only — exclude this invalid message
+        valid_turns = [t for t in turns if not (t["role"] == "user" and t["text"] == last_user_text)]
+        valid_texts = [t["text"] for t in valid_turns if t["role"] == "user"]
+        signals = _make_extractor().extract(valid_texts) if valid_texts else _default_signals()
+        dim_conf = _dim_confidence_from_signals(signals, max(0, user_turn_count - 1))
+        prev_q = f"\n\nกลับมาที่คำถามนี้เลยนะ: {last_ai_text}" if last_ai_text else ""
+        return {
+            "is_valid": False,
+            "reply": (
+                "ระบบตรวจพบข้อความที่ไม่สามารถประเมินผลได้ "
+                "รบกวนพิมพ์เป็นประโยคหรืออธิบายเพิ่มเติมอีกนิดนะครับ 😅"
+                + prev_q
+            ),
+            "partial_scores": _flatten_scores(signals),
+            "dimension_confidence": dim_conf,
+            "confidence": _compute_confidence(signals, max(0, user_turn_count - 1)),
+            "show_result": False,
+        }
+
     # ── เส้นทาง Gemini ──────────────────────────────────────────────────────
     gemini_result = gemini_client.chat_analyze(turns, user_turn_count, api_key=api_key)
     if gemini_result is not None:
         return gemini_result
 
     # ── เส้นทาง Fallback ────────────────────────────────────────────────────
-    # ตรวจสอบข้อความล่าสุดของผู้ใช้ก่อน
-    last_user_text = next((t["text"] for t in reversed(turns) if t["role"] == "user"), "")
+    # last_user_text already set above
     is_valid = _is_valid_response(last_user_text)
 
     if not is_valid:
