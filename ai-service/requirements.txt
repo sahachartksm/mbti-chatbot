@@ -6,6 +6,9 @@ pydantic>=2.9.0
 # Google Gemini — chat mode primary engine (set GEMINI_API_KEY env to enable)
 google-generativeai>=0.8.0
 
+# Environment variable management
+python-dotenv>=1.0.0
+
 # ML — quiz mode + keyword fallback for chat (used when Gemini unavailable)
 scikit-learn>=1.5.2
 numpy>=2.1.0

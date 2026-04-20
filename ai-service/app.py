@@ -9,9 +9,13 @@ env vars:
   AI_PORT            → port (default: 8000)
 """
 
+import logging
 import os
 from contextlib import asynccontextmanager
 from typing import List, Optional
+
+from dotenv import load_dotenv
+load_dotenv()
 
 from fastapi import FastAPI, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
@@ -20,6 +24,16 @@ from pydantic import BaseModel, Field
 from predictor import predict, load_model, load_sbert, USE_SBERT
 import gemini_client
 import chat_predictor
+
+logger = logging.getLogger(__name__)
+
+# ── Final-gate keywords (app.py layer — last resort before sending to Go) ────
+# If the AI reply contains any of these, show_result is forced True regardless
+# of what lower layers decided.
+_SHOW_RESULT_GATE: tuple = (
+    "ดูผล", "กดปุ่ม", "วิเคราะห์ครบ", "วิเคราะห์เสร็จ",
+    "ผลลัพธ์", "ผลการวิเคราะห์", "ดูผลลัพธ์", "สรุปผล",
+)
 
 
 # ── Pydantic Models ───────────────────────────────────────────────────────────
@@ -43,11 +57,13 @@ class ChatAnalyzeRequest(BaseModel):
     session_id: str
     turns: List[ChatTurnItem]
     user_turn_count: int = 0
+    api_key: Optional[str] = None
 
 
 class ChatFinalRequest(BaseModel):
     session_id: str
     turns: List[ChatTurnItem]
+    api_key: Optional[str] = None
 
 
 # ── Lifespan ──────────────────────────────────────────────────────────────────
@@ -152,9 +168,23 @@ def chat_analyze(req: ChatAnalyzeRequest):
     """
     try:
         turns = [{"role": t.role, "text": t.text} for t in req.turns]
-        result = chat_predictor.analyze(turns, req.user_turn_count)
+        result = chat_predictor.analyze(turns, req.user_turn_count, api_key=req.api_key)
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"chat analyze error: {e}")
+
+    # ── Final safety gate (app.py) ─────────────────────────────────────────
+    # Last line of defence before this payload reaches Go.
+    # If the AI said "ดูผล" / "วิเคราะห์ครบ" etc. in the reply but show_result
+    # is still False (Gemini inconsistency or field-name mismatch), override it.
+    if not result.get("show_result", False):
+        reply_lower = str(result.get("reply", "")).lower()
+        if any(kw in reply_lower for kw in _SHOW_RESULT_GATE):
+            logger.warning(
+                "Final-gate [app.py]: keyword in reply but show_result=False — forcing True. "
+                f"reply[:80]={result.get('reply','')[:80]!r}"
+            )
+            result["show_result"] = True
+
     return result
 
 
@@ -168,7 +198,7 @@ def chat_final(req: ChatFinalRequest):
     """
     try:
         turns = [{"role": t.role, "text": t.text} for t in req.turns]
-        result = chat_predictor.finalize(turns)
+        result = chat_predictor.finalize(turns, api_key=req.api_key)
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"chat final error: {e}")
     return result

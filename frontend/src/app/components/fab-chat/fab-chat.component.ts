@@ -33,8 +33,43 @@ import { Result } from '../../services/chat.service';
             <div class="header-sub">วิเคราะห์บุคลิกภาพจากบทสนทนา</div>
           </div>
         </div>
-        <button class="close-btn" (click)="toggleChat()">✕</button>
+        <div class="header-actions">
+          <button class="icon-btn" (click)="toggleSettings()" [title]="showSettings() ? 'ปิดตั้งค่า' : 'ตั้งค่า API Key'">
+            {{ showSettings() ? '✕' : '⚙️' }}
+          </button>
+          <button class="close-btn" (click)="toggleChat()">✕</button>
+        </div>
       </div>
+
+      <!-- Settings Panel -->
+      @if (showSettings()) {
+        <div class="settings-panel">
+          <div class="settings-title">🔑 Gemini API Key</div>
+          <div class="settings-desc">
+            ใส่ Key ของคุณเองเพื่อใช้ Gemini โดยตรง
+            หากไม่ใส่จะใช้ Key ของเซิร์ฟเวอร์ (ถ้ามี)
+          </div>
+          <div class="settings-row">
+            <input
+              class="settings-input"
+              type="password"
+              placeholder="AIza..."
+              [(ngModel)]="apiKeyDraft"
+              (keyup.enter)="saveApiKey()"
+            />
+            <button class="settings-save-btn" (click)="saveApiKey()">บันทึก</button>
+          </div>
+          @if (apiKeySaved()) {
+            <div class="settings-saved">✓ บันทึกแล้ว</div>
+          }
+          @if (fabChat.apiKey()) {
+            <div class="settings-active">
+              ใช้งาน: {{ fabChat.apiKey().slice(0, 8) }}...
+              <button class="settings-clear-btn" (click)="clearApiKey()">ลบ</button>
+            </div>
+          }
+        </div>
+      }
 
       <!-- Messages -->
       <div class="messages" #scrollContainer>
@@ -52,11 +87,6 @@ import { Result } from '../../services/chat.service';
             @if (msg.role === 'ai') { <div class="avatar">🧠</div> }
             <div class="bubble" [class.ai-bubble]="msg.role === 'ai'" [class.user-bubble]="msg.role === 'user'">
               {{ msg.text }}
-              @if (msg.showResultButton && !mbtiResult()) {
-                <button class="result-btn" (click)="showResult()" [disabled]="isLoadingResult()">
-                  {{ isLoadingResult() ? 'กำลังวิเคราะห์...' : '✨ ดูผล MBTI ของคุณ' }}
-                </button>
-              }
             </div>
             @if (msg.role === 'user') { <div class="avatar user-avatar">👤</div> }
           </div>
@@ -99,8 +129,26 @@ import { Result } from '../../services/chat.service';
         <div class="chat-error">{{ error() }}</div>
       }
 
-      <!-- Input Bar -->
-      @if (!mbtiResult()) {
+      <!-- ── Chat Complete: ปุ่มดูผลลัพธ์ขนาดใหญ่ ──────────────── -->
+      @if (chatCompleted() && !mbtiResult()) {
+        <div class="complete-footer">
+          <div class="complete-hint">✅ วิเคราะห์บุคลิกภาพเสร็จแล้ว</div>
+          <button
+            class="view-result-btn"
+            (click)="showResult()"
+            [disabled]="isLoadingResult()"
+          >
+            @if (isLoadingResult()) {
+              <span class="btn-spinner"></span> กำลังประมวลผล...
+            } @else {
+              ✨ ดูผลลัพธ์ MBTI ของคุณ
+            }
+          </button>
+        </div>
+      }
+
+      <!-- ── Input Bar (ซ่อนเมื่อแชทจบหรือแสดงผลแล้ว) ────────── -->
+      @if (!chatCompleted() && !mbtiResult()) {
         <div class="input-bar">
           <input
             #inputEl
@@ -353,6 +401,106 @@ import { Result } from '../../services/chat.service';
     .send-btn:hover:not(:disabled) { opacity: 0.88; }
     .send-btn:disabled { opacity: 0.4; cursor: not-allowed; }
 
+    /* ── Header actions ─────────────────────────────────────────── */
+    .header-actions { display: flex; align-items: center; gap: 6px; }
+
+    .icon-btn {
+      background: rgba(255,255,255,0.2); border: none; color: white;
+      width: 28px; height: 28px; border-radius: 50%;
+      cursor: pointer; font-size: 0.85rem; display: flex; align-items: center; justify-content: center;
+      transition: background 0.2s;
+    }
+    .icon-btn:hover { background: rgba(255,255,255,0.35); }
+
+    /* ── Settings Panel ──────────────────────────────────────────── */
+    .settings-panel {
+      padding: 12px 14px;
+      background: #f9fafb;
+      border-bottom: 1px solid #e5e7eb;
+      flex-shrink: 0;
+    }
+    .settings-title { font-weight: 700; font-size: 0.85rem; color: #374151; margin-bottom: 4px; }
+    .settings-desc { font-size: 0.75rem; color: #6b7280; margin-bottom: 8px; line-height: 1.4; }
+    .settings-row { display: flex; gap: 6px; }
+    .settings-input {
+      flex: 1;
+      padding: 7px 10px;
+      border: 1px solid #d1d5db;
+      border-radius: 8px;
+      font-size: 0.82rem;
+      font-family: inherit;
+      outline: none;
+    }
+    .settings-input:focus { border-color: #667eea; }
+    .settings-save-btn {
+      padding: 7px 12px;
+      border-radius: 8px;
+      background: linear-gradient(135deg, #667eea, #764ba2);
+      color: white; border: none;
+      font-size: 0.82rem; font-weight: 600; cursor: pointer;
+      flex-shrink: 0;
+    }
+    .settings-save-btn:hover { opacity: 0.88; }
+    .settings-saved { margin-top: 6px; font-size: 0.75rem; color: #059669; font-weight: 600; }
+    .settings-active {
+      margin-top: 6px; font-size: 0.75rem; color: #4b5563;
+      display: flex; align-items: center; gap: 8px;
+    }
+    .settings-clear-btn {
+      background: none; border: none; color: #dc2626;
+      font-size: 0.75rem; cursor: pointer; text-decoration: underline; padding: 0;
+    }
+
+    /* ── Complete Footer ─────────────────────────────────────────── */
+    .complete-footer {
+      padding: 14px 14px 16px;
+      border-top: 1px solid #e5e7eb;
+      background: linear-gradient(to bottom, #fafafa, #fff);
+      flex-shrink: 0;
+      display: flex;
+      flex-direction: column;
+      gap: 10px;
+    }
+    .complete-hint {
+      text-align: center;
+      font-size: 0.78rem;
+      color: #059669;
+      font-weight: 600;
+    }
+    .view-result-btn {
+      width: 100%;
+      padding: 13px 16px;
+      border-radius: 14px;
+      background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+      color: white;
+      border: none;
+      font-size: 1rem;
+      font-weight: 700;
+      cursor: pointer;
+      letter-spacing: 0.3px;
+      box-shadow: 0 4px 16px rgba(102,126,234,0.45);
+      transition: opacity 0.2s, transform 0.15s;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      gap: 8px;
+    }
+    .view-result-btn:hover:not(:disabled) {
+      opacity: 0.92;
+      transform: translateY(-1px);
+      box-shadow: 0 6px 20px rgba(102,126,234,0.55);
+    }
+    .view-result-btn:disabled { opacity: 0.6; cursor: not-allowed; }
+    .btn-spinner {
+      width: 16px; height: 16px;
+      border: 2px solid rgba(255,255,255,0.4);
+      border-top-color: white;
+      border-radius: 50%;
+      animation: spin 0.7s linear infinite;
+      flex-shrink: 0;
+    }
+    @keyframes spin { to { transform: rotate(360deg); } }
+
     /* ── Mobile responsive ───────────────────────────────────────── */
     @media (max-width: 420px) {
       .chat-window { width: calc(100vw - 32px); right: 16px; }
@@ -363,7 +511,7 @@ import { Result } from '../../services/chat.service';
 export class FabChatComponent implements AfterViewChecked {
   @ViewChild('scrollContainer') private scrollContainer!: ElementRef<HTMLDivElement>;
 
-  private fabChat = inject(FabChatService);
+  readonly fabChat = inject(FabChatService);
 
   isOpen = signal(false);
   messages = signal<ChatMessage[]>([]);
@@ -373,6 +521,10 @@ export class FabChatComponent implements AfterViewChecked {
   isLoadingResult = signal(false);
   mbtiResult = signal<Result | null>(null);
   error = signal<string | null>(null);
+  chatCompleted = signal(false);
+  showSettings = signal(false);
+  apiKeyDraft = '';
+  apiKeySaved = signal(false);
 
   readonly dimPairs = [['E', 'I'], ['S', 'N'], ['T', 'F'], ['J', 'P']];
 
@@ -383,6 +535,26 @@ export class FabChatComponent implements AfterViewChecked {
       this.scrollToBottom();
       this.shouldScroll = false;
     }
+  }
+
+  toggleSettings() {
+    this.showSettings.update(v => !v);
+    this.apiKeySaved.set(false);
+    if (this.showSettings()) {
+      this.apiKeyDraft = this.fabChat.apiKey();
+    }
+  }
+
+  saveApiKey() {
+    this.fabChat.saveApiKey(this.apiKeyDraft);
+    this.apiKeySaved.set(true);
+    setTimeout(() => this.apiKeySaved.set(false), 2000);
+  }
+
+  clearApiKey() {
+    this.apiKeyDraft = '';
+    this.fabChat.saveApiKey('');
+    this.apiKeySaved.set(false);
   }
 
   async toggleChat() {
@@ -431,9 +603,13 @@ export class FabChatComponent implements AfterViewChecked {
       this.messages.update(msgs => [...msgs, {
         role: 'ai',
         text: resp.reply,
-        showResultButton: resp.show_result_button,
         timestamp: new Date(),
       }]);
+      // is_completed is the canonical field; show_result_button is the legacy alias
+      if (resp.is_completed || resp.show_result_button) {
+        console.log('[FabChat] Chat completed — showing result button');
+        this.chatCompleted.set(true);
+      }
       this.shouldScroll = true;
     } catch {
       this.error.set('ส่งข้อความไม่สำเร็จ กรุณาลองใหม่');
@@ -460,6 +636,7 @@ export class FabChatComponent implements AfterViewChecked {
     this.messages.set([]);
     this.mbtiResult.set(null);
     this.error.set(null);
+    this.chatCompleted.set(false);
     this.fabChat.reset();
     this.startConversation();
   }

@@ -13,16 +13,33 @@ import json
 import logging
 import os
 import re
+import threading
 from typing import Dict, List, Optional
+
+from dotenv import load_dotenv
+load_dotenv()
 
 logger = logging.getLogger(__name__)
 
 GEMINI_API_KEY: str = os.getenv("GEMINI_API_KEY", "")
+
+# Serialise calls that reconfigure the global Gemini client
+_key_lock = threading.Lock()
 GEMINI_MODEL: str = os.getenv("GEMINI_MODEL", "gemini-2.0-flash")
 
-# ── MIN TURNS ─────────────────────────────────────────────────────────────────
-MIN_USER_TURNS_FOR_RESULT = 10   # ต้องคุยอย่างน้อย 10 รอบก่อนสรุปผล
+# ── THRESHOLDS ────────────────────────────────────────────────────────────────
+MIN_USER_TURNS_FOR_RESULT = 5    # Absolute minimum (sanity guard); AI may finish earlier
 DIM_CONFIDENCE_THRESHOLD = 0.80  # แต่ละ dimension ต้องมั่นใจ > 80%
+
+# ── Safety-net keywords ───────────────────────────────────────────────────────
+# ถ้า Gemini ใส่คำเหล่านี้ใน reply แต่ลืมตั้ง show_result=true → Python บังคับให้
+_RESULT_TRIGGER_KEYWORDS: tuple = (
+    "ดูผล mbti", "กดปุ่มดูผล", "กดดูผล", "ดูผลลัพธ์", "ดูผล",
+    "วิเคราะห์ครบ", "วิเคราะห์เสร็จ", "วิเคราะห์เสร็จแล้ว",
+    "พร้อมดูผล", "สรุปผล mbti", "สรุปบุคลิกภาพ",
+    "ผลการวิเคราะห์", "ผล mbti", "ผลลัพธ์ mbti",
+    "✨ ดูผล", "กดปุ่ม",
+)
 
 # ── System Prompts ────────────────────────────────────────────────────────────
 
@@ -35,11 +52,17 @@ ANALYZE_SYSTEM_PROMPT = """\
 โดยอาศัยข้อมูลเชิงลึกจากกระบวนการคิด พฤติกรรม และค่านิยม ไม่ใช่แค่ความชอบผิวเผิน
 
 ━━━ กฎเหล็ก (ต้องปฏิบัติเคร่งครัด) ━━━
-1. ห้ามด่วนสรุป: ต้องสนทนาอย่างน้อย 10-15 รอบก่อน — ต้องรวบรวมข้อมูลให้เพียงพอ
+1. ห้ามด่วนสรุปก่อน 5 รอบ: ต้องรวบรวมข้อมูลให้เพียงพออย่างน้อย 5 รอบสนทนา
 2. ห้ามถามซ้ำ: ตรวจสอบ Chat History ทุกครั้ง อย่าถามประเด็นเดิมที่ได้ข้อมูลไปแล้ว
 3. ถามเจาะลึก Cognitive Functions เท่านั้น — ไม่ถามผิวเผิน
 4. วิเคราะห์ Behavioral Signals จากรูปแบบการเขียนด้วย (ดูรายละเอียดด้านล่าง)
-5. show_result = true ได้ก็ต่อเมื่อ: สนทนา ≥ 10 รอบ AND dimension_confidence ทุกด้าน ≥ 0.80
+5. เมื่อวิเคราะห์ครบทุก dimension แล้ว ไม่ต้องรอครบ 10 รอบ — สรุปผลได้ทันที (Early Exit)
+
+🚨 CRITICAL RULE — อ่านและปฏิบัติตามทุกครั้ง:
+   ทันทีที่ "reply" ของคุณมีข้อความใดก็ตามที่เชิญผู้ใช้ดูผลลัพธ์ กดปุ่ม หรือบอกว่าวิเคราะห์เสร็จแล้ว
+   คุณ MUST ตั้งค่า "show_result": true ใน JSON เสมอ
+   ห้ามตั้ง "show_result": false ในกรณีนี้ เด็ดขาด ไม่ว่ากรณีใดทั้งสิ้น
+   → ตัวอย่าง: ถ้า reply มีคำว่า "ดูผล" / "กดปุ่ม" / "วิเคราะห์ครบ" / "ผลลัพธ์" → show_result ต้อง true
 
 ━━━ Framework: Cognitive Functions ━━━
 ใช้คำถามที่แยกแยะ 8 Cognitive Functions ได้ชัดเจน:
@@ -78,9 +101,38 @@ ANALYZE_SYSTEM_PROMPT = """\
   T/F: ตอบด้วยเหตุผลตรงๆ (T) vs เชื่อมกับความรู้สึก/คนอื่น (F)
   J/P: ประโยคมีโครงสร้างชัด (J) vs ความคิดไหลต่อเนื่องไม่มีจุดหยุด (P)
 
+━━━ ขั้นตอนที่ 1: ประเมินข้อความล่าสุด (Answer Validation) ━━━
+ก่อนตอบทุกครั้ง ให้อ่านข้อความล่าสุดของผู้ใช้ (บรรทัดสุดท้ายที่ขึ้นต้นด้วย "ผู้ใช้:") แล้วประเมินว่าเป็น
+ข้อมูลที่นำมาวิเคราะห์บุคลิกภาพ MBTI ได้หรือไม่
+
+ตั้งค่า "is_valid": true ถ้าข้อความ:
+  ✓ ตอบคำถามที่ AI ถามไปก่อนหน้า หรือให้ข้อมูลเกี่ยวกับตัวเองที่วิเคราะห์ได้
+  ✓ เล่าเรื่องราว พฤติกรรม ความคิด หรือความรู้สึกของตัวเอง
+  ✓ แม้จะนอกเรื่องบ้าง แต่ยังให้เบาะแสชีวิตจริงที่อนุมาน MBTI ได้
+
+ตั้งค่า "is_valid": false ถ้าข้อความ:
+  ✗ สั้นเกินไปจนวิเคราะห์ไม่ได้ (เช่น "ก็ได้" / "ไม่รู้" / "อาจจะ" / "555" / "ok" / "เออ")
+  ✗ ชวนคุยนอกเรื่องที่ไม่เกี่ยวกับตัวเองเลย (เช่น ถามเรื่องหนัง, ข่าว, ให้ AI ช่วยทำงาน)
+  ✗ ถามกลับมาที่ AI โดยไม่ให้ข้อมูลตัวเอง (เช่น "คุณคิดยังไง?" / "ทำไมถึงถาม?")
+  ✗ ข้อความที่ไม่สามารถนำมาวิเคราะห์บุคลิกภาพได้เลย
+
+━━━ ขั้นตอนที่ 2: สร้าง Reply ตามผล Validation ━━━
+
+เมื่อ is_valid = true:
+  → วิเคราะห์ข้อมูลทั้งหมดในประวัติการสนทนา
+  → ตอบรับสิ่งที่ผู้ใช้พูด + ถามเจาะลึก Cognitive Functions ต่อไป
+  → อัปเดต partial_scores และ dimension_confidence ตามข้อมูลใหม่
+
+เมื่อ is_valid = false:
+  → "reply" ต้องประกอบด้วย: (1) พูดตักเตือนอย่างสุภาพ/อธิบายว่าต้องการข้อมูลอะไร
+    และ (2) ทวนคำถามเดิมที่ AI ถามไปก่อนหน้าซ้ำอีกครั้ง เพื่อดึงกลับเข้าเรื่อง
+  → "partial_scores" ใช้ค่าจากการสนทนาก่อนหน้าเท่านั้น (ไม่นับข้อความที่ invalid)
+  → "show_result" ต้องเป็น false เสมอ
+
 ━━━ Format การตอบ (JSON เท่านั้น) ━━━
 {
-  "reply": "<ข้อความตอบกลับธรรมชาติ ตอบรับสิ่งที่ผู้ใช้พูด + ถามเจาะลึก Cognitive Functions ถัดไป>",
+  "is_valid": <true | false>,
+  "reply": "<ข้อความตอบกลับ — ถ้า valid: ถามต่อ / ถ้า invalid: ตักเตือน + ทวนคำถามเดิม>",
   "partial_scores": {
     "E": <0-100>, "I": <0-100>,
     "S": <0-100>, "N": <0-100>,
@@ -100,7 +152,9 @@ ANALYZE_SYSTEM_PROMPT = """\
 
 ข้อกำหนดสำคัญ:
   - E+I=100, S+N=100, T+F=100, J+P=100
-  - show_result = true ได้เมื่อ: EI≥0.80 AND SN≥0.80 AND TF≥0.80 AND JP≥0.80
+  - show_result = true ได้เมื่อ: is_valid=true AND วิเคราะห์ครบทุก dimension
+  - ไม่จำเป็นต้องรอครบ 10 รอบ — ถ้าข้อมูลพอแล้วให้จบได้เลย (Early Exit)
+  - ⚠️ ถ้า reply บอกให้ผู้ใช้กดปุ่มดูผล → show_result ต้อง true เสมอ ห้ามตั้ง false
   - confidence = ค่าเฉลี่ยของ dimension_confidence ทั้ง 4
   - ถ้ายังไม่มีข้อมูลพอ ให้ dimension_confidence = 0.0-0.3 และ partial_scores = 50/50
   - ใช้ภาษาไทยที่เป็นธรรมชาติ เป็นกันเอง
@@ -271,16 +325,55 @@ def _all_dims_confident(dim_conf: Dict, threshold: float = DIM_CONFIDENCE_THRESH
 
 # ── Public API ────────────────────────────────────────────────────────────────
 
-def chat_analyze(turns: List[Dict], user_turn_count: int) -> Optional[Dict]:
+def _models_for_key(api_key: Optional[str]):
+    """
+    Return (analyze_model, finalize_model) for the given key.
+    When api_key is provided it takes precedence over the server env key;
+    the global client is reconfigured under a lock so concurrent requests
+    don't interfere with each other.
+    """
+    import google.generativeai as genai
+    key = (api_key or "").strip()
+    if not key:
+        return _model_analyze, _model_finalize
+
+    with _key_lock:
+        genai.configure(api_key=key)
+        gen_cfg = {"response_mime_type": "application/json"}
+        m_analyze = genai.GenerativeModel(
+            model_name=GEMINI_MODEL,
+            system_instruction=ANALYZE_SYSTEM_PROMPT,
+            generation_config=gen_cfg,
+        )
+        m_finalize = genai.GenerativeModel(
+            model_name=GEMINI_MODEL,
+            system_instruction=FINALIZE_SYSTEM_PROMPT,
+            generation_config=gen_cfg,
+        )
+        # Restore server key so the global models stay valid after this call
+        if GEMINI_API_KEY:
+            genai.configure(api_key=GEMINI_API_KEY)
+        return m_analyze, m_finalize
+
+
+def chat_analyze(turns: List[Dict], user_turn_count: int, api_key: Optional[str] = None) -> Optional[Dict]:
     """
     ส่ง full chat history → Gemini วิเคราะห์ → reply + scores + confidence
+
+    api_key: ถ้าผู้ใช้ส่ง key มาเองจาก frontend จะใช้ key นั้น
+             ถ้าไม่มีจะ fallback ไปใช้ GEMINI_API_KEY จาก .env
 
     show_result = true เมื่อ:
       - user_turn_count >= MIN_USER_TURNS_FOR_RESULT (10)
       - AND dimension_confidence ทุกด้าน >= 0.80
     """
-    if not is_available():
-        return None
+    user_key = (api_key or "").strip()
+    if user_key:
+        model_analyze, _ = _models_for_key(user_key)
+    else:
+        if not is_available():
+            return None
+        model_analyze = _model_analyze
 
     history_text = _format_history(turns)
     prompt = (
@@ -294,30 +387,69 @@ def chat_analyze(turns: List[Dict], user_turn_count: int) -> Optional[Dict]:
         f"แล้วตอบกลับตาม JSON format ที่กำหนด"
     )
 
-    result = _call(_model_analyze, prompt)
+    result = _call(model_analyze, prompt)
     if result is None:
         return None
 
-    # Validate + fix
+    # ── is_valid: default True เมื่อ Gemini ไม่ส่งมา (safe fallback)
+    is_valid: bool = bool(result.get("is_valid", True))
+    result["is_valid"] = is_valid
+
+    # ── Validate + fix scores
     result["partial_scores"] = _fix_pairs(result.get("partial_scores", {}))
     dim_conf = result.get("dimension_confidence", {"EI": 0.0, "SN": 0.0, "TF": 0.0, "JP": 0.0})
     result["dimension_confidence"] = dim_conf
     result.setdefault("confidence", sum(dim_conf.values()) / 4)
     result.setdefault("behavioral_signals", "")
-    result.setdefault("reply", "เล่าต่อได้เลยนะ 😊")
 
-    # กฎ: show_result = true เมื่อครบเงื่อนไขเท่านั้น
+    # ── Normalise reply field ─────────────────────────────────────────────────
+    # Gemini sometimes uses "reply_message" or "message" instead of "reply"
+    if "reply" not in result:
+        result["reply"] = (
+            result.pop("reply_message", None)
+            or result.pop("message", None)
+            or "เล่าต่อได้เลยนะ 😊"
+        )
+    elif not result["reply"]:
+        result["reply"] = "เล่าต่อได้เลยนะ 😊"
+
+    # ── show_result decision: 3-layer logic ──────────────────────────────────
+    #
+    # Layer 1 — Gemini JSON flag (primary)
+    gemini_flag = bool(result.get("show_result", False))
+    #
+    # Layer 2 — Safety-net keyword check (fallback when Gemini sets flag incorrectly)
+    # Read the normalised reply field — guaranteed to exist at this point
+    reply_text = result["reply"].lower()
+    keyword_triggered = any(kw in reply_text for kw in _RESULT_TRIGGER_KEYWORDS)
+    if keyword_triggered and not gemini_flag:
+        logger.warning(
+            "Safety-net [gemini_client]: keyword detected but show_result=false — forcing true. "
+            f"reply[:80]={result['reply'][:80]!r}"
+        )
+    #
+    # Layer 3 — Hard guards: is_valid AND minimum turns (sanity check only)
     enough_turns = user_turn_count >= MIN_USER_TURNS_FOR_RESULT
-    all_confident = _all_dims_confident(dim_conf, DIM_CONFIDENCE_THRESHOLD)
-    result["show_result"] = enough_turns and all_confident
+    #
+    result["show_result"] = is_valid and enough_turns and (gemini_flag or keyword_triggered)
 
     return result
 
 
-def chat_finalize(turns: List[Dict]) -> Optional[Dict]:
-    """ส่ง full chat history → Gemini สรุป MBTI type พร้อม reasoning"""
-    if not is_available():
-        return None
+def chat_finalize(turns: List[Dict], api_key: Optional[str] = None) -> Optional[Dict]:
+    """
+    ส่ง full chat history → Gemini สรุป MBTI type พร้อม reasoning
+
+    api_key: ถ้าผู้ใช้ส่ง key มาเองจาก frontend จะใช้ key นั้น
+             ถ้าไม่มีจะ fallback ไปใช้ GEMINI_API_KEY จาก .env
+    """
+    user_key = (api_key or "").strip()
+    if user_key:
+        _, model_finalize = _models_for_key(user_key)
+    else:
+        if not is_available():
+            return None
+        model_finalize = _model_finalize
 
     history_text = _format_history(turns)
     prompt = (
@@ -329,7 +461,7 @@ def chat_finalize(turns: List[Dict]) -> Optional[Dict]:
         f"ตอบตาม JSON format ที่กำหนด"
     )
 
-    result = _call(_model_finalize, prompt)
+    result = _call(model_finalize, prompt)
     if result is None:
         return None
 

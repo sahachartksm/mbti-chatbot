@@ -48,6 +48,7 @@ func (h *Handler) ChatStart(w http.ResponseWriter, r *http.Request) {
 type chatMsgReq struct {
 	SessionID string `json:"session_id"`
 	Text      string `json:"text"`
+	APIKey    string `json:"api_key,omitempty"`
 }
 
 // POST /api/chat/message
@@ -96,6 +97,7 @@ func (h *Handler) ChatMessage(w http.ResponseWriter, r *http.Request) {
 		SessionID:     req.SessionID,
 		Turns:         dtos,
 		UserTurnCount: userTurnCount,
+		APIKey:        req.APIKey,
 	})
 	if err != nil {
 		writeErr(w, 502, "AI service error: "+err.Error(), nil)
@@ -109,12 +111,19 @@ func (h *Handler) ChatMessage(w http.ResponseWriter, r *http.Request) {
 		PartialScores: aiResp.PartialScores,
 	}
 
-	// บันทึกทั้ง user turn + ai turn ลง MongoDB
-	_ = h.Repo.AppendChatTurns(r.Context(), req.SessionID, []models.ChatTurn{userTurn, aiTurn})
+	// บันทึก user turn เฉพาะเมื่อ is_valid = true เท่านั้น
+	// ข้อความที่ invalid จะไม่ถูกนับใน Chat History เพื่อไม่ให้รบกวนการวิเคราะห์
+	turnsToSave := []models.ChatTurn{aiTurn}
+	if aiResp.IsValid {
+		turnsToSave = []models.ChatTurn{userTurn, aiTurn}
+	}
+	_ = h.Repo.AppendChatTurns(r.Context(), req.SessionID, turnsToSave)
 
 	writeJSON(w, 200, map[string]any{
 		"reply":              aiResp.Reply,
-		"show_result_button": aiResp.ShowResult,
+		"show_result_button": aiResp.ShowResult, // legacy name kept for compatibility
+		"is_completed":       aiResp.ShowResult, // canonical name used by frontend
+		"is_valid":           aiResp.IsValid,
 		"session_id":         req.SessionID,
 		"turn_count":         userTurnCount,
 	})
@@ -122,6 +131,7 @@ func (h *Handler) ChatMessage(w http.ResponseWriter, r *http.Request) {
 
 type chatResultReq struct {
 	SessionID string `json:"session_id"`
+	APIKey    string `json:"api_key,omitempty"`
 }
 
 // POST /api/chat/result
@@ -153,6 +163,7 @@ func (h *Handler) ChatResult(w http.ResponseWriter, r *http.Request) {
 	pred, err := h.AI.ChatFinal(ctx, ai.ChatFinalRequest{
 		SessionID: req.SessionID,
 		Turns:     dtos,
+		APIKey:    req.APIKey,
 	})
 	if err != nil {
 		writeErr(w, 502, "AI service error: "+err.Error(), nil)

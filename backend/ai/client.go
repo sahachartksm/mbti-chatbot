@@ -31,9 +31,11 @@ type ChatAnalyzeRequest struct {
 	SessionID     string        `json:"session_id"`
 	Turns         []ChatTurnDTO `json:"turns"`
 	UserTurnCount int           `json:"user_turn_count"`
+	APIKey        string        `json:"api_key,omitempty"`
 }
 
 type ChatAnalyzeResponse struct {
+	IsValid       bool           `json:"is_valid"`
 	Reply         string         `json:"reply"`
 	PartialScores map[string]int `json:"partial_scores"`
 	Confidence    float64        `json:"confidence"`
@@ -43,6 +45,7 @@ type ChatAnalyzeResponse struct {
 type ChatFinalRequest struct {
 	SessionID string        `json:"session_id"`
 	Turns     []ChatTurnDTO `json:"turns"`
+	APIKey    string        `json:"api_key,omitempty"`
 }
 
 type PredictRequest struct {
