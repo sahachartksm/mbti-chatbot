@@ -119,11 +119,17 @@ func (h *Handler) ChatMessage(w http.ResponseWriter, r *http.Request) {
 	}
 	_ = h.Repo.AppendChatTurns(r.Context(), req.SessionID, turnsToSave)
 
+	choices := aiResp.SuggestedChoices
+	if choices == nil {
+		choices = []string{}
+	}
+
 	writeJSON(w, 200, map[string]any{
 		"reply":              aiResp.Reply,
 		"show_result_button": aiResp.ShowResult, // legacy name kept for compatibility
 		"is_completed":       aiResp.ShowResult, // canonical name used by frontend
 		"is_valid":           aiResp.IsValid,
+		"suggested_choices":  choices,
 		"session_id":         req.SessionID,
 		"turn_count":         userTurnCount,
 	})

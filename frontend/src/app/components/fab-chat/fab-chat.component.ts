@@ -147,6 +147,19 @@ import { Result } from '../../services/chat.service';
         </div>
       }
 
+      <!-- ── Quick Reply Chips ─────────────────────────────────── -->
+      @if (!chatCompleted() && !mbtiResult() && suggestedChoices().length > 0) {
+        <div class="quick-replies">
+          @for (choice of suggestedChoices(); track choice) {
+            <button
+              class="chip"
+              (click)="selectChoice(choice)"
+              [disabled]="isLoading() || isStarting()"
+            >{{ choice }}</button>
+          }
+        </div>
+      }
+
       <!-- ── Input Bar (ซ่อนเมื่อแชทจบหรือแสดงผลแล้ว) ────────── -->
       @if (!chatCompleted() && !mbtiResult()) {
         <div class="input-bar">
@@ -365,6 +378,47 @@ import { Result } from '../../services/chat.service';
       flex-shrink: 0;
     }
 
+    /* ── Quick Reply Chips ───────────────────────────────────── */
+    .quick-replies {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 7px;
+      padding: 10px 14px 6px;
+      flex-shrink: 0;
+      border-top: 1px solid #f3f4f6;
+      background: #fafafa;
+      animation: fadeSlideUp 0.22s ease;
+    }
+    @keyframes fadeSlideUp {
+      from { opacity: 0; transform: translateY(8px); }
+      to   { opacity: 1; transform: translateY(0); }
+    }
+    .chip {
+      padding: 6px 14px;
+      border-radius: 20px;
+      border: 1.5px solid #c7d2fe;
+      background: white;
+      color: #4f46e5;
+      font-size: 0.8rem;
+      font-weight: 500;
+      font-family: inherit;
+      cursor: pointer;
+      transition: background 0.18s ease, border-color 0.18s ease,
+                  transform 0.15s ease, box-shadow 0.18s ease;
+      white-space: nowrap;
+    }
+    .chip:hover:not(:disabled) {
+      background: #eef2ff;
+      border-color: #818cf8;
+      transform: translateY(-2px);
+      box-shadow: 0 3px 8px rgba(99,102,241,0.22);
+    }
+    .chip:active:not(:disabled) {
+      transform: translateY(0);
+      box-shadow: none;
+    }
+    .chip:disabled { opacity: 0.45; cursor: not-allowed; }
+
     /* ── Input Bar ───────────────────────────────────────────────── */
     .input-bar {
       display: flex;
@@ -372,6 +426,11 @@ import { Result } from '../../services/chat.service';
       padding: 12px 14px;
       border-top: 1px solid #f3f4f6;
       flex-shrink: 0;
+    }
+    /* ลบ border-top ซ้อนเมื่อมี quick-replies อยู่เหนือ */
+    .quick-replies + .input-bar {
+      border-top: none;
+      padding-top: 8px;
     }
     .chat-input {
       flex: 1;
@@ -525,6 +584,7 @@ export class FabChatComponent implements AfterViewChecked {
   showSettings = signal(false);
   apiKeyDraft = '';
   apiKeySaved = signal(false);
+  suggestedChoices = signal<string[]>([]);
 
   readonly dimPairs = [['E', 'I'], ['S', 'N'], ['T', 'F'], ['J', 'P']];
 
@@ -582,11 +642,18 @@ export class FabChatComponent implements AfterViewChecked {
     }
   }
 
+  selectChoice(text: string) {
+    this.inputText = text;
+    this.suggestedChoices.set([]);
+    this.sendMessage();
+  }
+
   async sendMessage() {
     const text = this.inputText.trim();
     if (!text || this.isLoading()) return;
 
     this.inputText = '';
+    this.suggestedChoices.set([]);
     this.error.set(null);
 
     // แสดง user bubble ทันที (optimistic)
@@ -609,6 +676,12 @@ export class FabChatComponent implements AfterViewChecked {
       if (resp.is_completed || resp.show_result_button) {
         console.log('[FabChat] Chat completed — showing result button');
         this.chatCompleted.set(true);
+        this.suggestedChoices.set([]);
+      } else {
+        const raw = resp.suggested_choices;
+        const choices = (Array.isArray(raw) && raw.length > 0) ? raw : [];
+        console.log('[FabChat] suggested_choices received:', choices);
+        this.suggestedChoices.set(choices);
       }
       this.shouldScroll = true;
     } catch {
@@ -637,6 +710,7 @@ export class FabChatComponent implements AfterViewChecked {
     this.mbtiResult.set(null);
     this.error.set(null);
     this.chatCompleted.set(false);
+    this.suggestedChoices.set([]);
     this.fabChat.reset();
     this.startConversation();
   }

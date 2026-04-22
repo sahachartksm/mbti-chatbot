@@ -12,7 +12,7 @@ env vars:
 import logging
 import os
 from contextlib import asynccontextmanager
-from typing import List, Optional
+from typing import Any, Dict, List, Optional
 
 from dotenv import load_dotenv
 load_dotenv()
@@ -64,6 +64,17 @@ class ChatFinalRequest(BaseModel):
     session_id: str
     turns: List[ChatTurnItem]
     api_key: Optional[str] = None
+
+
+class ChatAnalyzeResponse(BaseModel):
+    """Response model สำหรับ /chat/analyze — ป้องกัน FastAPI ตัด field ทิ้ง"""
+    model_config = {"extra": "allow"}   # preserve fields ที่ไม่ได้ระบุ (partial_scores ฯลฯ)
+
+    is_valid:           bool       = True
+    reply:              str        = ""
+    suggested_choices:  List[str]  = Field(default_factory=list)
+    confidence:         float      = 0.0
+    show_result:        bool       = False
 
 
 # ── Lifespan ──────────────────────────────────────────────────────────────────
@@ -159,10 +170,10 @@ def do_predict(req: PredictRequest):
 # ── Chat mode: Gemini LLM (fallback: keyword) ─────────────────────────────────
 
 @app.post("/chat/analyze")
-def chat_analyze(req: ChatAnalyzeRequest):
+def chat_analyze(req: ChatAnalyzeRequest) -> Dict[str, Any]:
     """
     Chat mode — รับ full chat history → Gemini วิเคราะห์ทั้งหมด
-    คืน: reply (natural) + partial_scores + confidence + show_result flag
+    คืน: reply (natural) + partial_scores + confidence + show_result flag + suggested_choices
 
     Engine: Gemini API (ถ้ามี GEMINI_API_KEY) หรือ keyword fallback
     """
@@ -173,9 +184,6 @@ def chat_analyze(req: ChatAnalyzeRequest):
         raise HTTPException(status_code=500, detail=f"chat analyze error: {e}")
 
     # ── Final safety gate (app.py) ─────────────────────────────────────────
-    # Last line of defence before this payload reaches Go.
-    # If the AI said "ดูผล" / "วิเคราะห์ครบ" etc. in the reply but show_result
-    # is still False (Gemini inconsistency or field-name mismatch), override it.
     if not result.get("show_result", False):
         reply_lower = str(result.get("reply", "")).lower()
         if any(kw in reply_lower for kw in _SHOW_RESULT_GATE):

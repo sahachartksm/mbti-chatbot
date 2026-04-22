@@ -17,9 +17,10 @@ export interface StartChatResponse {
 
 export interface SendMessageResponse {
   reply: string;
-  is_completed: boolean;    // canonical — chat analysis is done, show result button
+  is_completed: boolean;      // canonical — chat analysis is done, show result button
   show_result_button: boolean; // legacy alias from backend
   is_valid: boolean;
+  suggested_choices: string[];
   session_id: string;
   turn_count: number;
 }

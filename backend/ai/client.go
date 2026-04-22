@@ -1,11 +1,11 @@
 package ai
 
 import (
+	"fmt"
 	"bytes"
 	"context"
 	"encoding/json"
 	"errors"
-	"fmt"
 	"io"
 	"net/http"
 	"time"
@@ -35,11 +35,12 @@ type ChatAnalyzeRequest struct {
 }
 
 type ChatAnalyzeResponse struct {
-	IsValid       bool           `json:"is_valid"`
-	Reply         string         `json:"reply"`
-	PartialScores map[string]int `json:"partial_scores"`
-	Confidence    float64        `json:"confidence"`
-	ShowResult    bool           `json:"show_result"`
+	IsValid          bool           `json:"is_valid"`
+	Reply            string         `json:"reply"`
+	SuggestedChoices []string       `json:"suggested_choices"`
+	PartialScores    map[string]int `json:"partial_scores"`
+	Confidence       float64        `json:"confidence"`
+	ShowResult       bool           `json:"show_result"`
 }
 
 type ChatFinalRequest struct {
