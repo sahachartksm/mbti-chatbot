@@ -200,19 +200,36 @@ def analyze(turns: List[Dict], user_turn_count: int, api_key: str | None = None)
       0..9  → show MBTI_QUESTIONS[next_q_idx]
       ≥ 10  → show_result=True + COMPLETE_MESSAGE
     """
-    next_q_idx = user_turn_count - 1
+    next_q_idx   = user_turn_count - 1
+    # Question the user was currently answering (shown in previous AI turn).
+    # When is_valid=False the invalid turn is NOT saved by Go, so next request
+    # will have the same user_turn_count → repeat the same question, not the next one.
+    repeat_q_idx = max(0, next_q_idx - 1)
 
-    # ── Python gibberish gate (ไม่เรียก Gemini ถ้าผ่านไม่ได้) ──────────────
     last_user_text = next((t["text"] for t in reversed(turns) if t["role"] == "user"), "")
-    if not validate_user_input(last_user_text):
+
+    # ── Exact-match bypass: quick reply buttons are always valid ─────────────
+    # Check whether the user's text matches one of the choices from the previous
+    # question (i.e. they tapped a Quick Reply button).  If so, skip ALL
+    # validation — neither the Python gibberish gate nor Gemini's is_valid check
+    # should reject a choice the system itself offered.
+    prev_q_idx      = user_turn_count - 2
+    is_choice_bypass = (
+        0 <= prev_q_idx < TOTAL_QUESTIONS
+        and last_user_text.strip() in MBTI_QUESTIONS[prev_q_idx]["suggested_choices"]
+    )
+
+    # ── Python gibberish gate (skip when bypass applies) ─────────────────────
+    if not is_choice_bypass and not validate_user_input(last_user_text):
         valid_turns = [t for t in turns if not (t["role"] == "user" and t["text"] == last_user_text)]
         valid_texts = [t["text"] for t in valid_turns if t["role"] == "user"]
         signals  = _make_extractor().extract(valid_texts) if valid_texts else _default_signals()
         dim_conf = _dim_confidence_from_signals(signals, max(0, user_turn_count - 1))
 
-        if 0 <= next_q_idx < TOTAL_QUESTIONS:
-            question_repeat = "\n\n" + MBTI_QUESTIONS[next_q_idx]["reply"]
-            choices         = MBTI_QUESTIONS[next_q_idx]["suggested_choices"]
+        # Repeat the question the user was supposed to answer, NOT the next one
+        if 0 <= repeat_q_idx < TOTAL_QUESTIONS:
+            question_repeat = "\n\n" + MBTI_QUESTIONS[repeat_q_idx]["reply"]
+            choices         = MBTI_QUESTIONS[repeat_q_idx]["suggested_choices"]
         else:
             question_repeat = ""
             choices         = []
@@ -236,7 +253,10 @@ def analyze(turns: List[Dict], user_turn_count: int, api_key: str | None = None)
 
     # Extract from Gemini (with fallbacks)
     if gemini_result is not None:
-        is_valid      = bool(gemini_result.get("is_valid", True))
+        is_valid = bool(gemini_result.get("is_valid", True))
+        # Choice bypass overrides Gemini's decision — the choice came from the system
+        if is_choice_bypass:
+            is_valid = True
         acknowledge   = gemini_result.get("acknowledge", "") if is_valid else ""
         partial_scores = gemini_result.get("partial_scores", _default_partial_scores())
         dim_conf      = gemini_result.get("dimension_confidence", _default_dim_conf())
@@ -267,13 +287,17 @@ def analyze(turns: List[Dict], user_turn_count: int, api_key: str | None = None)
 
     # ── Gemini says invalid ───────────────────────────────────────────────────
     if not is_valid:
+        # Repeat the question the user was supposed to answer (repeat_q_idx),
+        # not the next one (next_q_idx) — invalid turns are NOT saved by Go,
+        # so the turn counter won't advance anyway.
+        rq = MBTI_QUESTIONS[repeat_q_idx] if 0 <= repeat_q_idx < TOTAL_QUESTIONS else q
         return {
             "is_valid":          False,
             "reply":             (
                 "ขออภัยครับ ฉันอ่านข้อความนี้ไม่เข้าใจ "
-                "รบกวนพิมพ์ใหม่อีกครั้งได้ไหมครับ?\n\n" + q["reply"]
+                "รบกวนพิมพ์ใหม่อีกครั้งได้ไหมครับ?\n\n" + rq["reply"]
             ),
-            "suggested_choices": q["suggested_choices"],
+            "suggested_choices": rq["suggested_choices"],
             "partial_scores":    partial_scores,
             "dimension_confidence": dim_conf,
             "confidence":        confidence,
