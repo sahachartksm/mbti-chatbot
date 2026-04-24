@@ -1,10 +1,10 @@
 # 10 — Chatbot MBTI Interactive Icon (FAB Chat Mode)
 
-> ระบบนี้เปลี่ยนโหมดการทดสอบจาก "เลือกตอบทีละข้อ" → **"พูดคุยกับ AI แบบ Free-text"**
-> AI วิเคราะห์บุคลิกภาพ MBTI จากบทสนทนาเองโดยไม่ต้องถามทีละคำถาม
+> ระบบนี้ใช้ **Hybrid Approach**: ถามคำถาม MBTI ตายตัว 10 ข้อจาก Fixed Question Bank
+> โดย AI ทำหน้าที่วิเคราะห์เนื้อหาคำตอบและอัปเดต scores เท่านั้น — ไม่สร้างคำถามเอง
 
-> **Implementation Status:** ✅ Implemented & Updated (2026-04-20)
-> ไฟล์ที่สร้าง/แก้ไข: `ai-service/gemini_client.py`, `ai-service/chat_predictor.py`, `ai-service/app.py`, `ai-service/requirements.txt`, `ai-service/.env.example`, `backend/ai/client.go`, `backend/handlers/chat.go`, `frontend/.../fab-chat.component.ts`, `frontend/.../fab-chat.service.ts`
+> **Implementation Status:** ✅ Implemented & Updated (2026-04-24)
+> ไฟล์ที่สร้าง/แก้ไข: `ai-service/gemini_client.py`, `ai-service/chat_predictor.py`, `ai-service/app.py`, `ai-service/mbti_questions.py`, `ai-service/requirements.txt`, `ai-service/.env.example`, `backend/ai/client.go`, `backend/handlers/chat.go`, `frontend/.../fab-chat.component.ts`, `frontend/.../fab-chat.service.ts`
 
 ---
 
@@ -19,8 +19,8 @@
 │  │ [Settings Panel — API Key input]     │  ← toggle ⚙️  │
 │  ├──────────────────────────────────────┤               │
 │  │  AI: สวัสดี! เล่าให้ฟังหน่อยได้ไหม │               │
-│  │  User: วันนี้ผมชอบ...               │               │
-│  │  AI: เข้าใจแล้ว! ขอถามเพิ่ม...      │               │
+│  │  User: [วางแผนเป๊ะๆ]  ← Quick Reply │               │
+│  │  AI: เข้าใจแล้ว! ข้อต่อไป...        │               │
 │  │  ...                                 │               │
 │  │  ┌────────────────────────────────┐  │               │
 │  │  │  Inline Result Card (INTJ ...)  │  │               │
@@ -58,7 +58,7 @@ frontend/src/app/services/
 
 | สถานะ | เงื่อนไข | แสดง |
 |--------|----------|------|
-| **กำลังคุย** | `!chatCompleted && !mbtiResult` | Input bar + ปุ่มส่ง |
+| **กำลังคุย** | `!chatCompleted && !mbtiResult` | Input bar + ปุ่มส่ง + Quick Reply buttons |
 | **วิเคราะห์เสร็จ** | `chatCompleted && !mbtiResult` | ปุ่ม "✨ ดูผลลัพธ์ MBTI" เต็มความกว้าง |
 | **แสดงผลแล้ว** | `mbtiResult` | Inline Result Card (input ซ่อน) |
 
@@ -72,26 +72,44 @@ frontend/src/app/services/
 
 ---
 
-## 💬 Core Concept — Free-text Chat
+## 💬 Core Concept — Hybrid Approach
 
-### เปรียบเทียบ 2 โหมด
+### เปรียบเทียบ 3 โหมด
 
-| | โหมดเดิม (Quiz) | โหมดใหม่ (FAB Chat) |
-|--|-----------------|---------------------|
-| **วิธีตอบ** | เลือก a/b/c ทีละข้อ | พิมพ์คุยอิสระ |
-| **ข้อมูลที่ได้** | structured choices 20 ข้อ | free-text หลาย turn |
-| **ประสบการณ์ผู้ใช้** | ทำแบบทดสอบ | คุยกับ AI เป็นธรรมชาติ |
-| **Engine หลัก** | rule-based + LogReg | **Google Gemini API (LLM)** |
-| **Engine สำรอง** | — | SBERT + keyword + behavioral signals |
-| **จำนวนรอบขั้นต่ำ** | 20 ข้อ (คงที่) | 5 รอบ (sanity guard) |
-| **เกณฑ์สรุปผล** | ครบ 20 ข้อ | Gemini วิเคราะห์ครบ + safety-net keywords |
+| | โหมดเดิม (Quiz) | Free-text Chat | **Hybrid (ปัจจุบัน)** |
+|--|-----------------|----------------|-----------------------|
+| **วิธีตอบ** | เลือก a/b/c ทีละข้อ | พิมพ์คุยอิสระ | **ปุ่ม Quick Reply (ตายตัว)** |
+| **คำถาม** | 20 ข้อ fixed | AI สร้างเอง | **10 ข้อ fixed จาก Question Bank** |
+| **บทบาท AI** | — | สร้างคำถาม + วิเคราะห์ | **วิเคราะห์เนื้อหาเท่านั้น** |
+| **Engine หลัก** | rule-based + LogReg | Gemini (free-form) | **Gemini (analysis only)** |
+| **Engine สำรอง** | — | SBERT + keyword | SBERT + keyword |
+| **จำนวนรอบ** | 20 ข้อ (คงที่) | ≥5 turns | **10 คำถาม (คงที่)** |
+| **เกณฑ์สรุปผล** | ครบ 20 ข้อ | AI + keyword | **ครบ 10 คำถาม → show_result** |
+
+### Hybrid Approach ทำงานอย่างไร
+
+```
+Python เลือกคำถาม (Fixed Question Bank)
+       ↓
+User ตอบผ่านปุ่ม Quick Reply หรือพิมพ์เอง
+       ↓
+Gemini วิเคราะห์เฉพาะเนื้อหาคำตอบ:
+  - is_valid (ตอบถูกต้องไหม)
+  - acknowledge (ตอบรับสั้นๆ 1-2 ประโยค)
+  - partial_scores (E/I/S/N/T/F/J/P)
+  - dimension_confidence
+       ↓
+Python ประกอบ reply = acknowledge + MBTI_QUESTIONS[next_idx]["reply"]
+       ↓
+suggested_choices = MBTI_QUESTIONS[next_idx]["suggested_choices"]
+```
 
 ---
 
 ## ⚙️ Technical Logic — Data Flow รายขั้น
 
 ```
-User พิมพ์ข้อความ
+User พิมพ์ข้อความ (หรือกดปุ่ม Quick Reply)
        │
        ▼
 [Angular FAB Component]
@@ -101,33 +119,41 @@ User พิมพ์ข้อความ
        ▼
 [Go Backend — /api/chat/message]
   - validate request
-  - นับ userTurnCount (valid turns เท่านั้น + turn ใหม่)
+  - นับ userTurnCount (valid turns ที่บันทึกแล้ว + turn ใหม่)
   - ส่ง full history ไป AI Service  POST /chat/analyze
        │
        ▼
 [Python AI Service — /chat/analyze]
-  ┌── Layer 0: Answer Validation ───────────────────────────┐
-  │  ตรวจสอบข้อความล่าสุดว่าวิเคราะห์ MBTI ได้ไหม          │
-  │  → is_valid: true/false (Gemini) หรือ keyword check     │
+  ┌── Layer 0: Quick Reply Bypass ──────────────────────────┐
+  │  ถ้า user_text ตรงกับ suggested_choices ของคำถามก่อนหน้า │
+  │  → ข้ามการ validate ทั้งหมด (is_choice_bypass = True)   │
+  └─────────────────────────────────────────────────────────┘
+  ┌── Layer 1: Python Gibberish Gate ───────────────────────┐
+  │  validate_user_input() — ตรวจ keyboard mashing          │
+  │  (ไทย/QWERTY home row, สระซ้อน, พยัญชนะต่อกัน ≥5)     │
+  │  → False: return redirect + repeat คำถามเดิม           │
   └─────────────────────────────────────────────────────────┘
   ┌── Primary (ถ้ามี GEMINI_API_KEY) ───────────────────────┐
-  │  1) Normalize reply field (check reply/reply_message)   │
-  │  2) ส่ง full history ไป Gemini API                      │
-  │  3) Gemini วิเคราะห์ Cognitive Functions + reply        │
-  │  4) 3-layer show_result decision (ดูด้านล่าง)          │
+  │  Gemini วิเคราะห์เนื้อหาเท่านั้น:                      │
+  │  → is_valid, acknowledge, partial_scores, dim_conf      │
+  │  Python ประกอบ reply = acknowledge + MBTI_QUESTIONS[n]  │
+  │  suggested_choices = MBTI_QUESTIONS[n]["suggested_choices"]│
   └─────────────────────────────────────────────────────────┘
   ┌── Fallback (ไม่มี Gemini) ──────────────────────────────┐
-  │  1) _is_valid_response() check (keyword tokens)         │
-  │  2) BehavioralSignalExtractor: SBERT + keyword + regex  │
-  │  3) คำนวณ confidence + resolved_dims                    │
-  │  4) ReplyGenerator: เลือก follow-up question            │
+  │  BehavioralSignalExtractor: SBERT + keyword + regex     │
+  │  คำนวณ partial_scores + dimension_confidence            │
+  └─────────────────────────────────────────────────────────┘
+  ┌── show_result Decision ─────────────────────────────────┐
+  │  next_q_idx = user_turn_count - 1                       │
+  │  show_result = True ถ้า next_q_idx >= 10                │
+  │  (ตอบครบ 10 คำถามแล้ว → Python บังคับ)                 │
   └─────────────────────────────────────────────────────────┘
   ┌── Final Safety Gate (app.py) ───────────────────────────┐
   │  ถ้า reply มีคำว่า "ดูผล"/"วิเคราะห์ครบ" ฯลฯ          │
   │  แต่ show_result ยังเป็น false → บังคับ true            │
   └─────────────────────────────────────────────────────────┘
-  - return: {is_valid, reply, partial_scores, dimension_confidence,
-             confidence, show_result}
+  - return: {is_valid, reply, suggested_choices, partial_scores,
+             dimension_confidence, confidence, show_result}
        │
        ▼
 [Go Backend]
@@ -137,7 +163,7 @@ User พิมพ์ข้อความ
        │
        ▼
 [Angular]
-  - แสดง reply ใน chat bubble
+  - แสดง reply ใน chat bubble + Quick Reply buttons
   - ถ้า is_completed=true → chatCompleted.set(true)
     → ซ่อน input bar
     → แสดงปุ่ม "✨ ดูผลลัพธ์ MBTI ของคุณ"
@@ -168,8 +194,8 @@ export class FabChatComponent implements AfterViewChecked {
   isLoadingResult = signal(false);
   mbtiResult      = signal<Result | null>(null);
   error           = signal<string | null>(null);
-  chatCompleted   = signal(false);      // ← ใหม่: ระดับ component (ไม่ใช่ per-message)
-  showSettings    = signal(false);      // ← ใหม่: settings panel toggle
+  chatCompleted   = signal(false);      // ← ระดับ component (ไม่ใช่ per-message)
+  showSettings    = signal(false);      // ← settings panel toggle
   apiKeyDraft     = '';
   apiKeySaved     = signal(false);
 }
@@ -306,11 +332,11 @@ type ChatAnalyzeRequest struct {
     SessionID     string        `json:"session_id"`
     Turns         []ChatTurnDTO `json:"turns"`
     UserTurnCount int           `json:"user_turn_count"`
-    APIKey        string        `json:"api_key,omitempty"`  // ← ใหม่: user key
+    APIKey        string        `json:"api_key,omitempty"`
 }
 
 type ChatAnalyzeResponse struct {
-    IsValid       bool           `json:"is_valid"`       // ← ใหม่
+    IsValid       bool           `json:"is_valid"`
     Reply         string         `json:"reply"`
     PartialScores map[string]int `json:"partial_scores"`
     Confidence    float64        `json:"confidence"`
@@ -366,6 +392,38 @@ func (h *Handler) ChatMessage(w http.ResponseWriter, r *http.Request) {
 
 ## 🧠 Python AI Service
 
+### `mbti_questions.py` — Fixed Question Bank (10 ข้อ)
+
+```python
+# ai-service/mbti_questions.py
+
+MBTI_QUESTIONS = [
+    # Index 0 — EI: Energy source after social interaction
+    { "dimension": "EI",
+      "reply": "หลังจากใช้เวลากับคนอื่นทั้งวัน คุณมักรู้สึกอย่างไร — พลังงานเพิ่มขึ้น หรือ อยากกลับไปพักคนเดียว?",
+      "suggested_choices": ["พลังงานเพิ่มขึ้น", "อยากกลับไปพักคนเดียว", "แล้วแต่สถานการณ์"] },
+    # Index 1 — JP: Planning vs spontaneous travel
+    # Index 2 — TF: Reaction to unexpected plan changes
+    # Index 3 — TF: Helping friends (Fe vs Te)
+    # Index 4 — EI: Decision-making style
+    # Index 5 — SN: Learning style
+    # Index 6 — SN: Memory style (Si vs Ni)
+    # Index 7 — JP: Daily structure
+    # Index 8 — TF: Conflict resolution
+    # Index 9 — SN: Work autonomy
+]
+
+TOTAL_QUESTIONS = len(MBTI_QUESTIONS)  # = 10
+
+COMPLETE_MESSAGE = (
+    "ขอบคุณที่ตอบทุกคำถามนะครับ 😊 "
+    "ตอนนี้ฉันวิเคราะห์บุคลิกภาพของคุณครบแล้ว — "
+    "กดปุ่มด้านล่างเพื่อดูผล MBTI ของคุณได้เลยครับ! ✨"
+)
+```
+
+ครอบคลุม dimension: EI(×2), SN(×3), TF(×3), JP(×2) รวม 10 ข้อ
+
 ### `app.py` — Endpoints + Final Safety Gate
 
 ```python
@@ -383,149 +441,161 @@ def chat_analyze(req: ChatAnalyzeRequest):
     result = chat_predictor.analyze(turns, req.user_turn_count, api_key=req.api_key)
 
     # ── Final Safety Gate ──────────────────────────────────────────────
-    # ถ้า show_result ยังเป็น False แต่ reply มีคำ trigger → บังคับ True
-    # (ป้องกัน Gemini ตั้ง JSON flag ผิดแต่ข้อความถูก)
     if not result.get("show_result", False):
         reply_lower = str(result.get("reply", "")).lower()
         if any(kw in reply_lower for kw in _SHOW_RESULT_GATE):
-            logger.warning("Final-gate: keyword in reply but show_result=False — forcing True")
             result["show_result"] = True
 
     return result
 ```
 
-### `gemini_client.py` — 3-Layer show_result Decision
-
-```python
-# ai-service/gemini_client.py
-
-MIN_USER_TURNS_FOR_RESULT = 5    # sanity guard เท่านั้น — AI finish ก่อนได้ (Early Exit)
-DIM_CONFIDENCE_THRESHOLD  = 0.80  # อ้างอิงใน fallback mode
-
-# Safety-net keywords — ถ้า Gemini ลืมตั้ง flag แต่พิมพ์คำเหล่านี้ใน reply
-_RESULT_TRIGGER_KEYWORDS: tuple = (
-    "ดูผล mbti", "กดปุ่มดูผล", "กดดูผล", "ดูผลลัพธ์", "ดูผล",
-    "วิเคราะห์ครบ", "วิเคราะห์เสร็จ", "วิเคราะห์เสร็จแล้ว",
-    "พร้อมดูผล", "สรุปผล mbti", "สรุปบุคลิกภาพ",
-    "ผลการวิเคราะห์", "ผล mbti", "ผลลัพธ์ mbti",
-    "✨ ดูผล", "กดปุ่ม",
-)
-
-def chat_analyze(turns, user_turn_count, api_key=None) -> Optional[Dict]:
-    result = _call(model_analyze, prompt)
-
-    # is_valid — default True ถ้า Gemini ไม่ส่งมา
-    is_valid = bool(result.get("is_valid", True))
-    result["is_valid"] = is_valid
-
-    # Normalize reply field — Gemini บางครั้งใช้ "reply_message" หรือ "message"
-    if "reply" not in result:
-        result["reply"] = (
-            result.pop("reply_message", None)
-            or result.pop("message", None)
-            or "เล่าต่อได้เลยนะ 😊"
-        )
-
-    # ── show_result: 3 layers ─────────────────────────────────────────
-    # Layer 1: Gemini JSON flag (primary)
-    gemini_flag = bool(result.get("show_result", False))
-
-    # Layer 2: keyword safety-net (fallback เมื่อ Gemini ตั้ง flag ผิด)
-    keyword_triggered = any(kw in result["reply"].lower()
-                            for kw in _RESULT_TRIGGER_KEYWORDS)
-
-    # Layer 3: hard guards (sanity only)
-    enough_turns = user_turn_count >= MIN_USER_TURNS_FOR_RESULT
-
-    result["show_result"] = is_valid and enough_turns and (gemini_flag or keyword_triggered)
-    return result
-```
-
-### System Prompt — ANALYZE_SYSTEM_PROMPT (กฎหลัก)
-
-```
-กฎเหล็ก:
-1. ห้ามด่วนสรุปก่อน 5 รอบ — รวบรวมข้อมูลให้พอ
-2. ห้ามถามซ้ำ — ตรวจ Chat History ทุกครั้ง
-3. ถามเจาะลึก Cognitive Functions เท่านั้น
-4. วิเคราะห์ Behavioral Signals จากรูปแบบการเขียนด้วย
-5. Early Exit — วิเคราะห์ครบทุก dim แล้ว จบได้ทันที ไม่ต้องรอ 10 รอบ
-
-🚨 CRITICAL RULE:
-   ทันทีที่ reply มีเนื้อหาเชิญให้ดูผลหรือกดปุ่ม
-   ต้องตั้ง "show_result": true ใน JSON เสมอ
-   ห้ามตั้ง false เด็ดขาด ไม่ว่ากรณีใดทั้งสิ้น
-```
-
-### `chat_predictor.py` — Answer Validation + Routing
+### `chat_predictor.py` — Fixed Question Routing + Validation
 
 ```python
 # ai-service/chat_predictor.py
 
-_INVALID_TOKENS: set = {
-    "ก็ได้", "ไม่รู้", "อาจจะ", "555", "ok", "เออ", "อ่อ",
-    "ครับ", "ค่ะ", "นะ", "...", "ใช่", "ไม่", "เฉยๆ", ...
-}
-
-def _is_valid_response(text: str) -> bool:
-    """Fallback mode — คัดกรองคำตอบที่สั้น/ไม่มีความหมาย"""
-    stripped = text.strip()
-    if len(stripped) < 5: return False
-    if stripped.lower() in _INVALID_TOKENS: return False
-    return True
-
 def analyze(turns, user_turn_count, api_key=None) -> Dict:
-    # ── Primary: Google Gemini (is_valid, reply, show_result รวมอยู่ใน result)
-    gemini_result = gemini_client.chat_analyze(turns, user_turn_count, api_key=api_key)
-    if gemini_result is not None:
-        return gemini_result
+    next_q_idx   = user_turn_count - 1   # คำถามถัดไปที่จะแสดง
+    repeat_q_idx = max(0, next_q_idx - 1) # คำถามที่ต้องทวนซ้ำหาก invalid
 
-    # ── Fallback: Keyword/SBERT
-    last_user_text = next((t["text"] for t in reversed(turns) if t["role"] == "user"), "")
-    is_valid = _is_valid_response(last_user_text)
+    last_user_text = ...
 
-    if not is_valid:
-        # ดึงคำถามล่าสุดของ AI เพื่อทวนซ้ำ
-        last_ai = next((t["text"] for t in reversed(turns) if t["role"] == "ai"), "")
+    # ── Quick Reply Bypass ────────────────────────────────────────────
+    # ถ้า user text ตรงกับ suggested_choices ของคำถามก่อนหน้า → valid เสมอ
+    prev_q_idx       = user_turn_count - 2
+    is_choice_bypass = (
+        0 <= prev_q_idx < TOTAL_QUESTIONS
+        and last_user_text.strip() in MBTI_QUESTIONS[prev_q_idx]["suggested_choices"]
+    )
+
+    # ── Python Gibberish Gate (ข้ามถ้า bypass) ───────────────────────
+    if not is_choice_bypass and not validate_user_input(last_user_text):
+        # ทวนคำถามเดิม, ไม่นับ turn
+        return { "is_valid": False, "reply": "...", ... }
+
+    # ── Gemini Analysis ───────────────────────────────────────────────
+    gemini_result = gemini_client.chat_analyze(turns, user_turn_count, api_key)
+    # is_choice_bypass overrides Gemini's is_valid decision
+
+    # ── show_result: ครบ 10 คำถาม (Python บังคับ ไม่ขึ้นกับ AI) ──────
+    if next_q_idx >= TOTAL_QUESTIONS:
         return {
-            "is_valid": False,
-            "reply": f"ขอโทษนะ ต้องการข้อมูลเกี่ยวกับตัวคุณ 😊\n\n{last_ai}",
-            "partial_scores": ...,   # ใช้ scores จาก valid turns ก่อนหน้า
-            "show_result": False,
+            "is_valid": True,
+            "reply": COMPLETE_MESSAGE,
+            "suggested_choices": [],
+            "show_result": True,
+            ...
         }
 
-    # ... วิเคราะห์ตามปกติ
+    # ── Valid: combine acknowledge + next fixed question ──────────────
+    q     = MBTI_QUESTIONS[next_q_idx]
+    reply = (acknowledge + "\n\n" + q["reply"]) if acknowledge else q["reply"]
     return {
-        "is_valid": True,
-        "reply": reply,
-        "partial_scores": _flatten_scores(signals),
-        "dimension_confidence": dim_conf,
-        "confidence": confidence,
-        "show_result": show_result,
+        "is_valid":          True,
+        "reply":             reply,
+        "suggested_choices": q["suggested_choices"],
+        "show_result":       False,
+        ...
     }
+```
+
+### `gemini_client.py` — ANALYZE_SYSTEM_PROMPT (Hybrid Mode)
+
+```
+หน้าที่ของ Gemini: วิเคราะห์ข้อความที่ผู้ใช้ตอบมาเท่านั้น
+
+⛔ ห้ามสร้างคำถามใหม่ — ระบบจัดการคำถามเองแล้ว
+⛔ ห้ามสร้าง suggested_choices — ระบบจัดการตัวเลือกเองแล้ว
+
+สิ่งที่ต้องทำทุก turn:
+1. ประเมิน is_valid ของข้อความล่าสุด
+   🔑 CRITICAL: วลีสั้นๆ แบบ choice-style → is_valid: true เสมอ
+
+2. เขียน acknowledge (1-2 ประโยค ตอบรับ ห้ามถามคำถามใหม่)
+
+3. อัปเดต partial_scores และ dimension_confidence
+
+Output JSON:
+{
+  "reasoning": "...",
+  "is_valid": true/false,
+  "acknowledge": "...",
+  "partial_scores": { "E": 0-100, "I": 0-100, ... },
+  "dimension_confidence": { "EI": 0.0-1.0, ... },
+  "confidence": 0.0-1.0,
+  "behavioral_signals": "..."
+}
+```
+
+### `gemini_client.py` — FINALIZE_SYSTEM_PROMPT (Confidence Rules)
+
+```
+━━━ CRITICAL RULE FOR CONFIDENCE SCORE ━━━
+
+ผู้ใช้ตอบผ่านปุ่ม Quick Reply ที่ออกแบบมาวัด MBTI อย่างเป็นระบบ
+ห้ามหักคะแนน confidence เพราะคำตอบสั้น
+
+กฎ confidence (int 0-100):
+  - pole ชนะ > 65%  → confidence = 80-95
+  - pole ชนะ 51-65% → confidence = 65-79
+  - ห้ามต่ำกว่า 60 หากตอบครบ 10 คำถาม
+  - ส่งเป็น int เสมอ (85 ไม่ใช่ 0.85)
+```
+
+### `chat_finalize()` — Post-processing Confidence
+
+```python
+def chat_finalize(turns, api_key=None) -> Optional[Dict]:
+    result = _call(model_finalize, prompt)
+    result["dimensions"] = _fix_pairs(result["dimensions"])
+
+    # Normalize confidence → int (0-100) + minimum floor
+    conf = result.get("confidence", 60)
+    if isinstance(conf, float) and conf <= 1.0:
+        conf = round(conf * 100)   # 0.85 → 85
+    conf = int(conf)
+    user_turn_count = len([t for t in turns if t["role"] == "user"])
+    if user_turn_count >= MIN_USER_TURNS_FOR_RESULT:
+        conf = max(60, conf)       # floor 60 ถ้าตอบครบ
+    result["confidence"] = max(0, min(100, conf))
+    return result
 ```
 
 ---
 
 ## 🛡️ Answer Validation System
 
-ระบบคัดกรองข้อความผู้ใช้ก่อนบันทึกลง Chat History
+### ลำดับการตรวจสอบ
 
-### เกณฑ์ `is_valid = false`
+```
+1. Quick Reply Bypass (ข้าม validate ทั้งหมด)
+   ↓ (ไม่ใช่ quick reply)
+2. Python Gibberish Gate — validate_user_input()
+   ↓ (ผ่าน)
+3. Gemini is_valid check (override ถ้า is_choice_bypass=True)
+```
 
-| ประเภท | ตัวอย่าง |
-|--------|---------|
-| สั้นเกินไป (< 5 ตัวอักษร) | "ก็ได้", "ok", "555", "เออ" |
-| นอกเรื่องโดยสิ้นเชิง | ถามเรื่องหนัง, ข่าว, ให้ AI ช่วยงาน |
-| ถาม AI กลับโดยไม่ให้ข้อมูล | "คุณคิดยังไง?", "ทำไมถึงถาม?" |
+### `validate_user_input()` — ตรวจ Keyboard Mashing
+
+| เงื่อนไข | ผล |
+|----------|-----|
+| ความยาว < 2 ตัวอักษร | False |
+| อยู่ใน `_INVALID_TOKENS` | False |
+| อักขระซ้ำ ≥ 4 ครั้งติดกัน (`aaaa`) | False |
+| unique chars ≤ 2 และยาว > 5 | False |
+| Thai chars ไม่มีสระเลย (≥ 4 ตัว) | False |
+| ตัวอักษรทั้งหมดอยู่ใน home row เดียว | False |
+| พยัญชนะต่อกัน ≥ 5 ตัว (ไม่มีสระคั่น) | False |
+| เริ่มต้นด้วยสระ (`ะ`, `า`, `ิ`, ฯลฯ) | False |
+| อื่นๆ | True |
 
 ### ผลของ `is_valid = false`
 
 ```
-Gemini สร้าง reply = "ตักเตือนสุภาพ + ทวนคำถามเดิม"
-Python: show_result = false (บังคับ)
+Python Gate: return redirect + repeat คำถามเดิม (repeat_q_idx)
+Gemini Gate: acknowledge = "", Python ใช้ repeat คำถามเดิม
 Go: บันทึกเฉพาะ aiTurn (redirect) — ไม่บันทึก userTurn ลง MongoDB
-Frontend: แสดง redirect message แต่ turn_count ไม่นับ
+Frontend: แสดง redirect message, turn_count ไม่นับ
 ```
 
 ---
@@ -534,10 +604,12 @@ Frontend: แสดง redirect message แต่ turn_count ไม่นับ
 
 | ค่า | Gemini Mode | Fallback Mode |
 |-----|-------------|---------------|
-| `MIN_USER_TURNS_FOR_RESULT` | **5** (sanity guard, `gemini_client.py`) | **10** (`chat_predictor.py`) |
-| Early Exit | ✅ ได้ — Gemini วิเคราะห์ครบเมื่อไหรก็จบได้ | ❌ ต้องครบ 10 รอบ |
-| `DIM_CONFIDENCE_THRESHOLD` | 0.80 (แจ้ง Gemini ใน prompt) | 0.80 (overall) |
+| `MIN_USER_TURNS_FOR_RESULT` | **10** (`gemini_client.py`) | **10** (`chat_predictor.py`) |
+| `TOTAL_QUESTIONS` | 10 (`mbti_questions.py`) | 10 |
+| `show_result` trigger | ครบ 10 คำถาม (Python) | ครบ 10 คำถาม |
+| `DIM_CONFIDENCE_THRESHOLD` | 0.80 (ใช้ใน fallback) | 0.80 |
 | `RESOLVED_CLARITY` | — | 0.30 (clarity per dim) |
+| `confidence` floor (finalize) | **60** (ถ้าตอบครบ 10 ข้อ) | — |
 
 ---
 
@@ -573,7 +645,8 @@ Angular (localStorage)
 ```json
 {
   "is_valid": true,
-  "reply": "เข้าใจแล้ว! ขอถามเพิ่มเติม — เวลาต้องตัดสินใจสำคัญ...",
+  "reply": "เข้าใจแล้ว! ตอนนี้ขอถามข้อต่อไปนะ...\n\nเวลาไปเที่ยว คุณชอบแบบไหน — วางแผนเป๊ะๆ หรือ ด้นสดหน้างาน?",
+  "suggested_choices": ["วางแผนเป๊ะๆ", "ด้นสดหน้างาน", "ผสมผสาน"],
   "partial_scores": {
     "E": 30, "I": 70,
     "S": 45, "N": 55,
@@ -585,7 +658,7 @@ Angular (localStorage)
   },
   "confidence": 0.625,
   "show_result": false,
-  "behavioral_signals": "ตอบสั้น, ใช้คำรูปธรรม, มีโครงสร้างประโยคชัด"
+  "behavioral_signals": "ตอบสั้น, ใช้คำรูปธรรม"
 }
 ```
 
@@ -593,9 +666,19 @@ Angular (localStorage)
 ```json
 {
   "is_valid": false,
-  "reply": "ขอโทษนะ ฉันต้องการข้อมูลเกี่ยวกับตัวคุณ 😊\n\nกลับมาที่คำถาม: ...",
-  "partial_scores": { "E": 30, "I": 70, ... },
+  "reply": "ระบบตรวจพบข้อความที่ไม่สามารถประเมินผลได้...\n\n[ทวนคำถามเดิม]",
+  "suggested_choices": ["ตัวเลือกเดิม", ...],
   "show_result": false
+}
+```
+
+เมื่อตอบครบ 10 คำถาม:
+```json
+{
+  "is_valid": true,
+  "reply": "ขอบคุณที่ตอบทุกคำถามนะครับ 😊 ... กดปุ่มด้านล่าง ✨",
+  "suggested_choices": [],
+  "show_result": true
 }
 ```
 
@@ -608,22 +691,24 @@ Angular (localStorage)
   "is_completed": false,
   "is_valid": true,
   "session_id": "chat_01ARZ...",
-  "turn_count": 7
+  "turn_count": 3
 }
 ```
 
-เมื่อแชทเสร็จ:
+เมื่อแชทเสร็จ (ครบ 10 คำถาม):
 ```json
 {
-  "reply": "วิเคราะห์ครบทุกด้านแล้ว! ✨ กดปุ่มดูผล MBTI ของคุณได้เลย",
+  "reply": "ขอบคุณที่ตอบทุกคำถาม ... ✨",
   "show_result_button": true,
   "is_completed": true,
   "is_valid": true,
-  "turn_count": 12
+  "turn_count": 11
 }
 ```
 
-### `/chat/final` Response (เหมือนเดิม)
+### `/chat/final` Response
+
+> `confidence` เป็น **int (0-100)** เสมอ — ไม่ใช่ float
 
 ```json
 {
@@ -632,14 +717,14 @@ Angular (localStorage)
   "cognitive_stack": "Ni > Te > Fi > Se",
   "dimensions": {"E": 25, "I": 75, "S": 35, "N": 65, "T": 68, "F": 32, "J": 72, "P": 28},
   "dimension_confidence": {"EI": 0.88, "SN": 0.85, "TF": 0.82, "JP": 0.90},
-  "confidence": 0.8625,
+  "confidence": 86,
   "description": "คุณมีวิสัยทัศน์ที่ชัดเจน...",
-  "reasoning": "1. คุณพูดว่า... 2. สังเกตว่า...",
-  "behavioral_evidence": "ใช้คำนามธรรมมาก, ตอบยาวและเชื่อมโยงหลายแนวคิด",
-  "strengths": [...],
-  "weaknesses": [...],
-  "careers": [...],
-  "famous_people": [...],
+  "reasoning": "1. คุณเลือก 'คิดคนเดียวก่อน'... 2. เลือก 'เข้าใจภาพรวมก่อน'...",
+  "behavioral_evidence": "ตอบด้วย choice-style, ชัดเจน ไม่ลังเล",
+  "strengths": ["...", "...", "...", "..."],
+  "weaknesses": ["...", "...", "..."],
+  "careers": ["...", "...", "...", "..."],
+  "famous_people": ["...", "..."],
   "compatible_types": ["ENFP", "ENTP"]
 }
 ```
@@ -651,7 +736,7 @@ Angular (localStorage)
 ```javascript
 {
   "_id": "chat_01HW8...",
-  "created_at": ISODate("2026-04-20T03:00:00Z"),
+  "created_at": ISODate("2026-04-24T03:00:00Z"),
   "turns": [
     {
       "role": "ai",
@@ -662,17 +747,17 @@ Angular (localStorage)
     // ← user turns ที่ is_valid=false จะ ไม่ถูกบันทึก
     {
       "role": "user",
-      "text": "วันนี้ผมชอบอยู่บ้านคนเดียว อ่านหนังสือ",
+      "text": "อยากกลับไปพักคนเดียว",   // ← Quick Reply choice
       "ts": ISODate("..."),
       "partial_scores": null
     },
     {
       "role": "ai",
-      "text": "เข้าใจแล้ว! ขอถามเพิ่ม...",
+      "text": "เข้าใจแล้ว! ข้อต่อไป: เวลาไปเที่ยว...",
       "ts": ISODate("..."),
       "partial_scores": {"E": 25, "I": 75, ...}
     }
-    // ... (อย่างน้อย 5 valid user turns ก่อน show_result=true)
+    // ... ครบ 10 user turns → show_result = true
   ]
 }
 ```
@@ -684,7 +769,7 @@ Angular (localStorage)
 ### Angular (Frontend)
 | ไฟล์ | สิ่งที่ทำ |
 |------|-----------|
-| `components/fab-chat/fab-chat.component.ts` | FAB + chat window + settings panel + completion footer + inline result card |
+| `components/fab-chat/fab-chat.component.ts` | FAB + chat window + Quick Reply buttons + settings panel + completion footer + inline result card |
 | `services/fab-chat.service.ts` | HTTP calls + session/apiKey state (signal) + localStorage + console.log debug |
 | `app.component.ts` | import FabChatComponent + `<app-fab-chat />` |
 
@@ -700,8 +785,9 @@ Angular (localStorage)
 ### Python AI Service
 | ไฟล์ | สิ่งที่ทำ |
 |------|-----------|
-| `gemini_client.py` | Primary engine — Gemini API, 3-layer show_result, reply normalization, keyword safety-net, per-request api_key, `load_dotenv` |
-| `chat_predictor.py` | Router: Gemini → fallback, Answer Validation (`_is_valid_response`), `api_key` passthrough |
+| `mbti_questions.py` | Fixed Question Bank 10 ข้อ, `TOTAL_QUESTIONS`, `COMPLETE_MESSAGE` |
+| `gemini_client.py` | Hybrid Approach — Gemini วิเคราะห์เนื้อหาเท่านั้น, FINALIZE confidence rules (int 0-100), post-processing floor 60, per-request api_key |
+| `chat_predictor.py` | Fixed question routing, Quick Reply bypass, `validate_user_input()` (keyboard mashing), show_result จากการนับ question |
 | `app.py` | FastAPI endpoints, Final Safety Gate (`_SHOW_RESULT_GATE`), `load_dotenv` |
 | `behavioral_signals.py` | Fallback — `BehavioralSignalExtractor`: SBERT + keyword + regex |
 | `reply_generator.py` | Fallback — `generate_reply()`: no-repeat, skip resolved dim |
@@ -735,7 +821,7 @@ curl http://localhost:8000/health | jq .
 #   "chat_engine": "gemini",
 #   "gemini_enabled": true,
 #   "gemini_model": "gemini-2.0-flash",
-#   "min_turns_for_result": 5,
+#   "min_turns_for_result": 10,
 #   "dim_confidence_threshold": 0.80,
 #   ...
 # }
@@ -750,28 +836,30 @@ curl http://localhost:8000/health | jq .
 curl -X POST http://localhost:8080/api/chat/start \
   -H "Content-Type: application/json" -d '{}' | jq .
 
-# 2. ส่งข้อความ (ตรวจ is_completed และ is_valid ใน response)
+# 2. ส่งข้อความ (Quick Reply style)
 CSID=chat_xxx
 curl -X POST http://localhost:8080/api/chat/message \
   -H "Content-Type: application/json" \
-  -d "{\"session_id\":\"$CSID\",\"text\":\"วันนี้ผมชอบอยู่บ้านอ่านหนังสือคนเดียว\"}" | jq .
+  -d "{\"session_id\":\"$CSID\",\"text\":\"อยากกลับไปพักคนเดียว\"}" | jq .
 
-# 3. ดูผลเมื่อ is_completed = true
+# 3. ดูผลเมื่อ is_completed = true (หลังตอบครบ 10 คำถาม)
 curl -X POST http://localhost:8080/api/chat/result \
   -H "Content-Type: application/json" \
-  -d "{\"session_id\":\"$CSID\"}" | jq .
+  -d "{\"session_id\":\"$CSID\"}" | jq '{mbti_type, confidence}'
+# expected: confidence เป็น int (เช่น 85) ไม่ใช่ float
 
-# 4. ทดสอบ Final Safety Gate โดยตรง (ส่ง reply ที่มีคำ trigger)
+# 4. ทดสอบ Quick Reply Bypass
 curl -X POST http://localhost:8000/chat/analyze \
   -H "Content-Type: application/json" \
   -d '{
     "session_id": "test",
     "turns": [
-      {"role": "ai",   "text": "สวัสดี!"},
-      {"role": "user", "text": "ผมชอบอยู่คนเดียว คิดคนเดียว"}
+      {"role": "ai",   "text": "หลังจากใช้เวลากับคนอื่นทั้งวัน..."},
+      {"role": "user", "text": "อยากกลับไปพักคนเดียว"}
     ],
-    "user_turn_count": 6
-  }' | jq '{reply, show_result, is_valid}'
+    "user_turn_count": 2
+  }' | jq '{is_valid, reply}'
+# expected: is_valid=true (bypass เพราะตรงกับ suggested_choices)
 
 # 5. ทดสอบ Answer Validation (invalid response)
 curl -X POST http://localhost:8000/chat/analyze \
@@ -779,12 +867,12 @@ curl -X POST http://localhost:8000/chat/analyze \
   -d '{
     "session_id": "test",
     "turns": [
-      {"role": "ai",   "text": "คุณชอบอยู่คนเดียวหรือกับเพื่อน?"},
-      {"role": "user", "text": "ไม่รู้"}
+      {"role": "ai",   "text": "หลังจากใช้เวลากับคนอื่น..."},
+      {"role": "user", "text": "ฟหกด"}
     ],
     "user_turn_count": 2
   }' | jq '{is_valid, reply}'
-# expected: is_valid=false, reply มีคำขอโทษ + ทวนคำถาม
+# expected: is_valid=false (keyboard mashing)
 ```
 
 ---
@@ -792,30 +880,31 @@ curl -X POST http://localhost:8000/chat/analyze \
 ## 🎓 สรุป Logic ทั้งระบบ
 
 ```
-User พิมพ์ข้อความ (free-text)
+User กดปุ่ม Quick Reply (หรือพิมพ์เอง)
        ↓
 Angular: เก็บ bubble + ส่ง POST /api/chat/message {session_id, text, api_key?}
        ↓
 Go: นับ valid turns → ส่ง full history + api_key ไป Python
        ↓
 Python:
-  [Answer Validation]
-  ① Gemini ประเมิน is_valid (หรือ _is_valid_response() ใน fallback)
-  ② ถ้า invalid → reply = redirect, show_result = false → return
+  [Quick Reply Bypass]
+  ① ถ้า text ∈ suggested_choices ของคำถามก่อนหน้า → ข้าม validate ทั้งหมด
 
-  [Gemini Mode — มี API Key]
-  ① Normalize reply field (reply / reply_message / message)
-  ② Gemini วิเคราะห์ Cognitive Functions + สร้าง reply
-  ③ 3-layer show_result:
-     L1: Gemini JSON flag
-     L2: keyword safety-net ใน reply
-     L3: is_valid AND turns≥5
-  ④ Final Safety Gate ที่ app.py — override ถ้า keyword ใน reply
+  [Python Gibberish Gate]
+  ② validate_user_input() → False: return redirect + repeat คำถามเดิม
 
-  [Fallback Mode — ไม่มี Gemini]
-  ① keyword token validation
-  ② SBERT + keyword + regex → behavioral signals
-  ③ confidence + resolved_dims → show_result (ต้องครบ 10 รอบ)
+  [Gemini Analysis — Hybrid Mode]
+  ③ Gemini วิเคราะห์เนื้อหาเท่านั้น (ไม่สร้างคำถาม)
+     → is_valid, acknowledge, partial_scores, dimension_confidence
+  ④ Python ประกอบ reply = acknowledge + MBTI_QUESTIONS[next_q_idx]["reply"]
+  ⑤ suggested_choices = MBTI_QUESTIONS[next_q_idx]["suggested_choices"]
+
+  [show_result Decision]
+  ⑥ next_q_idx ≥ 10 → show_result=True (COMPLETE_MESSAGE)
+  ⑦ Final Safety Gate (app.py) — override ถ้ามี keyword ใน reply
+
+  [Fallback — ไม่มี Gemini]
+  ⑧ SBERT + keyword → behavioral signals + scores
        ↓
 Go:
   - is_valid=true  → บันทึก userTurn + aiTurn
@@ -823,12 +912,12 @@ Go:
   - ส่ง {reply, is_completed, is_valid, turn_count}
        ↓
 Angular:
-  - แสดง AI reply ใน bubble
+  - แสดง AI reply ใน bubble + Quick Reply buttons
   - is_completed=true → chatCompleted.set(true)
     → ซ่อน input bar
     → แสดง "✅ วิเคราะห์เสร็จแล้ว" + ปุ่ม "✨ ดูผลลัพธ์"
        ↓ (user กดปุ่ม)
-Go → AI /chat/final → MBTI type + cognitive_stack + reasoning
+Go → AI /chat/final → MBTI type + confidence (int 0-100, floor 60)
        ↓
 Angular: แสดง inline result card ใน chat window
 ```

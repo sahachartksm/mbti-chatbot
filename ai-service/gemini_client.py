@@ -114,6 +114,19 @@ FINALIZE_SYSTEM_PROMPT = """\
   2. หลักฐานจากบทสนทนาที่สนับสนุนการสรุป
   3. Behavioral Signals ที่สังเกตได้
 
+━━━ CRITICAL RULE FOR CONFIDENCE SCORE — ห้ามละเมิดเด็ดขาด ━━━
+
+ผู้ใช้ได้ตอบคำถามผ่านปุ่มตัวเลือกที่ถูกออกแบบมาเพื่อวัดขั้วบุคลิกภาพ (E/I, S/N, T/F, J/P)
+อย่างเป็นระบบ ดังนั้น **คุณต้องให้คะแนนความมั่นใจสูง**
+ห้ามหักคะแนน confidence เพียงเพราะข้อความคำตอบสั้น — ความสั้นเป็นผลจากรูปแบบปุ่ม ไม่ใช่ข้อมูลน้อย
+
+กฎการให้คะแนน confidence (ค่า int 0-100):
+  - คำตอบชัดเจน (pole ชนะ > 65%) → confidence = 80-95
+  - คำตอบก้ำกึ่ง (pole ชนะ 51-65%) → confidence = 65-79
+  - ห้ามให้ confidence ต่ำกว่า 60 เด็ดขาด หากผู้ใช้ตอบครบตามจำนวนที่กำหนด
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
 ตอบเป็น JSON เท่านั้น:
 {
   "mbti_type": "<4 ตัวอักษร เช่น INTJ>",
@@ -131,7 +144,7 @@ FINALIZE_SYSTEM_PROMPT = """\
     "TF": <0.0-1.0>,
     "JP": <0.0-1.0>
   },
-  "confidence": <0.0-1.0>,
+  "confidence": <int 0-100 ห้ามใช้ทศนิยม เช่น 85 ไม่ใช่ 0.85>,
   "description": "<คำอธิบาย 3-4 ประโยค อ้างอิงสิ่งที่ผู้ใช้พูดจริง ไม่ใช่ template>",
   "reasoning": "<อธิบายเหตุผลว่าทำไมถึงสรุปแบบนี้ อ้างอิงจากการสนทนาจริง 3-5 ข้อ>",
   "behavioral_evidence": "<สิ่งที่สังเกตได้จากรูปแบบการเขียน>",
@@ -147,6 +160,7 @@ FINALIZE_SYSTEM_PROMPT = """\
   - mbti_type ต้องสอดคล้องกับ dimensions (pole ที่ > 50 = ตัวนั้น)
   - reasoning ต้องอ้างอิงสิ่งที่ผู้ใช้พูดจริง ห้ามพูดลอยๆ
   - cognitive_stack ต้องสอดคล้องกับ mbti_type
+  - confidence ต้องเป็น int (เช่น 85) ห้ามเป็น float (เช่น 0.85)
 """
 
 # ── Pydantic schema สำหรับ Gemini response_schema ───────────────────────────
@@ -429,4 +443,15 @@ def chat_finalize(turns: List[Dict], api_key: Optional[str] = None) -> Optional[
             return None
 
     result["dimensions"] = _fix_pairs(result["dimensions"])
+
+    # Normalize confidence → int (0-100) and apply minimum floor
+    conf = result.get("confidence", 60)
+    if isinstance(conf, float) and conf <= 1.0:
+        conf = round(conf * 100)
+    conf = int(conf)
+    user_turn_count = len([t for t in turns if t["role"] == "user"])
+    if user_turn_count >= MIN_USER_TURNS_FOR_RESULT:
+        conf = max(60, conf)
+    result["confidence"] = max(0, min(100, conf))
+
     return result
